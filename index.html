@@ -252,36 +252,48 @@ function solveFrom(s0, cap) {
 
 // ==LEVELS START==
 const LEVELS = [
+  { name: "First roll", cols: 5, rows: 5, map: [".....",".....",".....",".....","....."],
+    cubes: [{ c: 0, r: 2, col: 1, len: 3 }], holes: [{ c: 4, r: 2, col: 1 }],
+    hint: "Drag the cube into the hole of its color." },
+  { name: "Sidestep", cols: 5, rows: 5, map: [".....","..#..","..#..","..#..","....."],
+    cubes: [{ c: 0, r: 2, col: 4, len: 3 }], holes: [{ c: 4, r: 2, col: 4 }] },
+  { name: "Wet paint", cols: 5, rows: 5, map: [".....",".....",".....",".....","....."],
+    cubes: [{ c: 0, r: 2, col: 1, len: 4 }, { c: 2, r: 0, col: 4, len: 4 }], holes: [{ c: 4, r: 2, col: 1 }, { c: 2, r: 4, col: 4 }],
+    hint: "Paint mixes when two colors touch." },
   { name: "Passing bay", cols: 5, rows: 3, map: ["##.##",".....","##.##"],
     cubes: [{ c: 1, r: 1, col: 1, len: 3 }, { c: 3, r: 1, col: 4, len: 1 }], holes: [{ c: 4, r: 1, col: 1 }, { c: 0, r: 1, col: 4 }] },
   { name: "Borrowed color", cols: 4, rows: 4, map: ["....",".#..","..#.","...."],
     cubes: [{ c: 0, r: 2, col: 1, len: 2 }, { c: 1, r: 2, col: 2, len: 2 }], holes: [{ c: 1, r: 3, col: 2 }, { c: 1, r: 0, col: 3 }] },
   { name: "Crossroads", cols: 5, rows: 5, map: ["##.##","##.##",".....","##.##","##.##"],
     cubes: [{ c: 1, r: 2, col: 1, len: 3 }, { c: 3, r: 2, col: 2, len: 3 }, { c: 2, r: 1, col: 4, len: 1 }], holes: [{ c: 4, r: 2, col: 1 }, { c: 0, r: 2, col: 2 }, { c: 2, r: 4, col: 4 }] },
+  { name: "Long haul", cols: 7, rows: 5, map: [".......",".x.#.x.",".......",".x.#.x.","......."],
+    cubes: [{ c: 1, r: 4, col: 1, len: 3, shape: 'rect' }], holes: [{ c: 1, r: 0, col: 1 }],
+    hint: "Tall cubes roll onto their side. They only drop in standing up." },
   { name: "Chain", cols: 5, rows: 5, map: [".....",".###.",".....",".###.","....."],
     cubes: [{ c: 1, r: 2, col: 1, len: 2 }, { c: 2, r: 2, col: 2, len: 2 }, { c: 3, r: 2, col: 4, len: 2 }], holes: [{ c: 0, r: 0, col: 1 }, { c: 4, r: 2, col: 4 }, { c: 0, r: 4, col: 6 }] },
-  { name: "Painter", cols: 6, rows: 5, map: ["....#.",".##...","...#.#",".#....","...##."],
-    cubes: [{ c: 1, r: 2, col: 8, len: 4 }, { c: 5, r: 0, col: 1, len: 2 }], holes: [{ c: 3, r: 0, col: 8 }, { c: 0, r: 1, col: 3 }] },
   { name: "Dye works", cols: 5, rows: 5, map: [".....",".###.",".....",".###.","....."],
     cubes: [{ c: 1, r: 2, col: 1, len: 3 }, { c: 0, r: 2, col: 4, len: 3 }], holes: [{ c: 0, r: 0, col: 3 }, { c: 0, r: 3, col: 4 }],
-    wells: [{ c: 3, r: 4, col: 2 }] },
-  { name: "Long haul", cols: 7, rows: 5, map: [".......",".x.#.x.",".......",".x.#.x.","......."],
-    cubes: [{ c: 1, r: 4, col: 1, len: 3, shape: 'rect' }], holes: [{ c: 1, r: 0, col: 1 }] },
+    wells: [{ c: 3, r: 4, col: 2 }],
+    hint: "A well dyes any cube that rolls over it." },
   { name: "Squeeze", cols: 7, rows: 5, map: ["....#..",".##.#.#",".......","#.##...","......."],
     cubes: [{ c: 4, r: 2, col: 1, len: 2, shape: 'rect' }, { c: 2, r: 4, col: 4, len: 2 }], holes: [{ c: 0, r: 4, col: 1 }, { c: 5, r: 0, col: 4 }] },
+  { name: "Painter", cols: 6, rows: 5, map: ["....#.",".##...","...#.#",".#....","...##."],
+    cubes: [{ c: 1, r: 2, col: 8, len: 4 }, { c: 5, r: 0, col: 1, len: 2 }], holes: [{ c: 3, r: 0, col: 8 }, { c: 0, r: 1, col: 3 }],
+    hint: "The rainbow cube paints with the face that lands." },
   { name: "Paint shop", cols: 5, rows: 6, map: [".x...",".#.#.",".x.x.",".#.#.","##.##","#...#"],
     cubes: [{ c: 0, r: 1, col: 1, len: 3 }, { c: 4, r: 3, col: 2, len: 2 }], holes: [{ c: 2, r: 1, col: 2 }, { c: 3, r: 5, col: 7 }],
     gates: [{ c: 2, r: 4, col: 3 }],
-    wells: [{ c: 2, r: 5, col: 4 }] },
-  { name: "Grand opening", cols: 5, rows: 6, map: [".x...",".#.#.",".x.x.",".#.#.","##.##","#...#"],
-    cubes: [{ c: 2, r: 0, col: 8, len: 4 }, { c: 0, r: 3, col: 1, len: 2 }], holes: [{ c: 2, r: 1, col: 8 }, { c: 3, r: 5, col: 7 }],
-    gates: [{ c: 2, r: 4, col: 3 }],
-    wells: [{ c: 2, r: 5, col: 4 }] },
+    wells: [{ c: 2, r: 5, col: 4 }],
+    hint: "A gate lets only its own color through." },
   { name: "Wide load", cols: 7, rows: 5, map: [".......",".#####.",".......",".#.#.#.","......."],
     cubes: [{ c: 1, r: 4, col: 1, len: 3, shape: 'rect' }, { c: 6, r: 3, col: 2, len: 2 }], holes: [{ c: 4, r: 4, col: 3 }, { c: 3, r: 0, col: 2 }] },
   { name: "Big finale", cols: 5, rows: 5, map: ["...#.",".#.#.",".....",".#.#.","...#."],
     cubes: [{ c: 1, r: 2, col: 1, len: 3, shape: 'rect' }, { c: 2, r: 4, col: 2, len: 2 }], holes: [{ c: 2, r: 3, col: 2 }, { c: 4, r: 2, col: 3 }],
     gates: [{ c: 3, r: 2, col: 1 }] },
+  { name: "Grand opening", cols: 5, rows: 6, map: [".x...",".#.#.",".x.x.",".#.#.","##.##","#...#"],
+    cubes: [{ c: 2, r: 0, col: 8, len: 4 }, { c: 0, r: 3, col: 1, len: 2 }], holes: [{ c: 2, r: 1, col: 8 }, { c: 3, r: 5, col: 7 }],
+    gates: [{ c: 2, r: 4, col: 3 }],
+    wells: [{ c: 2, r: 5, col: 4 }] },
 ];
 // ==LEVELS END==
 
@@ -338,10 +350,10 @@ function loadLevel(i) {
   G = {
     level: i, L, s, undo: [], moves: 0, status: 'play', t: 0,
     pa: new Float32Array(n).fill(1),                // paint fade-in per tile
-    ghosts: [], parts: [], floats: [], buttons: [],
+    ghosts: [], parts: [], floats: [], buttons: [], conf: [], taps: [],
     vis: s.cubes.map(q => newVis(q, 1)),
     holePulse: s.holes.map(() => 0),
-    coach: false, stuck: false,
+    coach: i === 0 && !SAVE.done[0], stuck: false,
   };
   const maxW = LW - 28, maxH = 540;
   G.ts = Math.floor(Math.min(maxW / s.cols, maxH / s.rows, 76));
@@ -355,6 +367,13 @@ function toTile(x, y) {
 }
 const cx = c => G.bx + (c + 0.5) * G.ts, cy = r => G.by + (r + 0.5) * G.ts;
 
+const buzz = ms => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} };
+function confetti(x, y, cols, n) {
+  for (let k = 0; k < n; k++) {
+    const a = -Math.PI / 2 + (hash(k * 3 + G.t * 9) - 0.5) * 2.6, v = 170 + hash(k * 5 + 7 + G.t) * 280;
+    G.conf.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, rot: hash(k + 1) * 6, vr: (hash(k + 9) - 0.5) * 14, t: 0, life: 1.5 + hash(k + 4) * 0.8, c: cols[k % cols.length], w: 6 + hash(k + 2) * 6 });
+  }
+}
 function burst(x, y, cols, n, speed = 120) {
   for (let k = 0; k < n; k++) {
     const a = hash(k + G.t * 7 + 1) * Math.PI * 2, v = speed * (0.4 + hash(k + 99 + G.t) * 0.8);
@@ -376,13 +395,14 @@ function stepCube(i, dc, dr) {
     if (prevPaint[t] > 0 && s.paint[t] === 0) G.ghosts.push({ idx: t, col: prevPaint[t], t: 0 });
     else if (s.paint[t] > 0 && s.paint[t] !== prevPaint[t]) G.pa[t] = 0;
   }
+  buzz(res.entered ? [12, 30, 18] : res.mixed ? 22 : 8);
   if (res.broke >= 0) burst(cx(res.broke % s.cols), cy((res.broke / s.cols) | 0), ['#8b8272', '#b5ad9c', '#6c6454'], 10, 90);
   if (res.entered) {
     const hi = s.holes.indexOf(res.hole);
     G.holePulse[hi] = 1;
     burst(cx(q.c), cy(q.r), [PAL[res.hole.col].c, PAL[res.hole.col].l, '#ffffff'], 18, 150);
     floatText(cx(q.c), cy(q.r) - 20, 'Out!', PAL[res.hole.col].d);
-    if (isWon(s)) { G.status = 'won'; G.wonT = 0; SAVE.done[G.level] = true; SAVE.unlocked = Math.max(SAVE.unlocked, G.level + 2); saveSave(); }
+    if (isWon(s)) { G.status = 'won'; G.wonT = 0; for (let k = 0; k < 3; k++) confetti(LW * (0.2 + 0.3 * k), LH * 0.5, ['#f2475f', '#ffc82e', '#3f8cff', '#2fcf6b', '#a55cf3', '#ffffff'], 36); SAVE.done[G.level] = true; SAVE.unlocked = Math.max(SAVE.unlocked, G.level + 2); saveSave(); }
   } else if (res.mixed) {
     v.pop = 1;
     burst(cx(q.c), cy(q.r), [PAL[res.from].c, PAL[res.overwrote || s.well[res.painted] || res.to].c, PAL[res.to].c], 16, 130);
@@ -519,7 +539,7 @@ function drawBoard() {
 }
 function drawPaintTile(idx, col, a) {
   const s = G.s, ts = G.ts, c = idx % s.cols, r = Math.floor(idx / s.cols);
-  const x = G.bx + c * ts, y = G.by + r * ts, P = PAL[col], m = ts * 0.06;
+  const x = G.bx + c * ts, y = G.by + r * ts, P = PAL[col], m = ts * 0.06 + (1 - Math.min(1, a)) * ts * 0.2;
   ctx.globalAlpha = a;
   rr(x + m, y + m, ts - 2 * m, ts - 2 * m, ts * 0.2);
   const g = ctx.createLinearGradient(0, y, 0, y + ts); g.addColorStop(0, P.l); g.addColorStop(1, P.c);
@@ -671,11 +691,17 @@ function drawCubes() {
     if (v.sc <= 0.02) continue;
     const S = ts * 0.74 * v.sc * (1 + v.pop * 0.22);
     const settled = !v.anim && !v.q.length && v.sc > 0.99;
-    drawCube(G.bx + (v.x + 0.5) * ts, G.by + (v.y + 0.5) * ts + ts * 0.18, S, q.col, v.M, v.lift * ts, v.sc > 0.99 ? 1 : v.sc, q.len, settled, q.shape ? [1, 1, 2] : null);
+    drawCube(G.bx + (v.x + 0.5) * ts, G.by + (v.y + 0.5) * ts + ts * 0.18, S, q.col, v.M, v.lift * ts, v.sc > 0.99 ? 1 : v.sc, q.len, settled, q.shape ? [1 + 0.07 * (v.land || 0), 1 + 0.07 * (v.land || 0), 2 * (1 - 0.07 * (v.land || 0))] : [1 + 0.1 * (v.land || 0), 1 + 0.1 * (v.land || 0), 1 - 0.12 * (v.land || 0)]);
   }
 }
 
 function drawEffects() {
+  for (const t of G.taps) { const k = t.t / 0.4; ctx.globalAlpha = 0.6 * (1 - k); ctx.beginPath(); ctx.arc(t.x, t.y, t.r * (0.5 + k * 0.9), 0, 7); ctx.lineWidth = 4 * (1 - k) + 1; ctx.strokeStyle = '#ffffff'; ctx.stroke(); }
+  for (const f of G.conf) {
+    ctx.globalAlpha = Math.min(1, (f.life - f.t) * 2); ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(f.rot); ctx.scale(1, Math.abs(Math.cos(f.rot * 1.3)) * 0.8 + 0.2);
+    ctx.fillStyle = f.c; ctx.fillRect(-f.w / 2, -f.w / 3, f.w, f.w * 0.66); ctx.restore();
+  }
+  ctx.globalAlpha = 1;
   for (const p of G.parts) {
     const k = p.t / p.life; ctx.globalAlpha = Math.max(0, 1 - k);
     ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (1 - k * 0.4), 0, 7); ctx.fillStyle = p.col; ctx.fill();
@@ -704,6 +730,7 @@ function drawHud() {
 
 // How colors mix, always on screen: it is the whole puzzle.
 function drawLegend() {
+  if (G.level < 2) return;                                // the first levels have nothing to mix
   const y = LH - 112;
   rr(20, y, LW - 40, 78, 20); ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fill();
   ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(120,100,60,0.2)'; ctx.stroke();
@@ -809,7 +836,7 @@ function animRect(v, q, dt, k) {
     v.y = piv[1] + a.dr * along + (c1[1] - end[1]) * e - 0.5;
     v.lift = Math.max(0, z - (wz * cs + ex * sn) / 2);
     v.M = mulMM(rotM(-a.dr, a.dc, 0, th), a.M0);
-    if (a.f >= 1) { v.q.shift(); v.anim = null; v.lift = 0; v.x = c1[0] - 0.5; v.y = c1[1] - 0.5; }
+    if (a.f >= 1) { v.q.shift(); v.anim = null; v.lift = 0; v.x = c1[0] - 0.5; v.y = c1[1] - 0.5; v.land = 1; burst(G.bx + (v.x + 0.5) * G.ts, G.by + (v.y + 0.5) * G.ts + G.ts * 0.2, ['#d9cfb8', '#efe7d4'], 6, 52); }
   } else {
     const ce = rectCenter(q.o, q.c, q.r);
     v.x += (ce[0] - 0.5 - v.x) * k; v.y += (ce[1] - 0.5 - v.y) * k; v.lift = 0;
@@ -823,6 +850,7 @@ function update(dt) {
   const k = 1 - Math.exp(-dt * 16);
   G.s.cubes.forEach((q, i) => {
     const v = G.vis[i];
+    v.land = Math.max(0, (v.land || 0) - dt * 6);
     if (q.shape) { animRect(v, q, dt, k); return; }
     if (!v.anim && v.q.length) v.anim = { dc: v.q[0].dc, dr: v.q[0].dr, f: 0, x0: Math.round(v.x), y0: Math.round(v.y), M0: v.M.slice() };
     if (v.anim) {
@@ -835,7 +863,7 @@ function update(dt) {
       v.lift = S / 2 * (Math.sin(th) + Math.cos(th)) - S / 2;
       v.x = a.x0 + a.dc * along; v.y = a.y0 + a.dr * along;
       v.M = mulMM(rotM(-a.dr, a.dc, 0, th), a.M0);                                           // axis = up x direction
-      if (a.f >= 1) { v.q.shift(); v.anim = null; v.lift = 0; v.x = a.x0 + a.dc; v.y = a.y0 + a.dr; }
+      if (a.f >= 1) { v.q.shift(); v.anim = null; v.lift = 0; v.x = a.x0 + a.dc; v.y = a.y0 + a.dr; v.land = 1; burst(G.bx + (v.x + 0.5) * G.ts, G.by + (v.y + 0.5) * G.ts + G.ts * 0.2, ['#d9cfb8', '#efe7d4'], 4, 42); }
     } else { v.x += (q.c - v.x) * k; v.y += (q.r - v.y) * k; v.lift = 0; }
     const gone = q.done && !v.anim && !v.q.length;
     v.sc += ((gone ? 0 : 1) - v.sc) * (1 - Math.exp(-dt * 10));
@@ -846,6 +874,9 @@ function update(dt) {
   G.ghosts = G.ghosts.filter(g => g.t < 0.3);
   for (const p of G.parts) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 260 * dt; }
   G.parts = G.parts.filter(p => p.t < p.life);
+  for (const f of G.conf) { f.t += dt; f.x += f.vx * dt; f.y += f.vy * dt; f.vy += 520 * dt; f.vx *= 1 - dt * 0.8; f.rot += f.vr * dt; }
+  G.conf = G.conf.filter(f => f.t < f.life);
+  for (const t of G.taps) t.t += dt; G.taps = G.taps.filter(t => t.t < 0.4);
   for (const f of G.floats) f.t += dt;
   G.floats = G.floats.filter(f => f.t < 1);
   G.holePulse = G.holePulse.map(v => Math.max(0, v - dt * 3));
@@ -879,7 +910,7 @@ cv.addEventListener('pointerdown', e => {
   const p = pointerPos(e);
   for (let k = G.buttons.length - 1; k >= 0; k--) {
     const b = G.buttons[k];
-    if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) { b.fn(); return; }
+    if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) { if (b.w < 120 && b.h < 120) G.taps.push({ x: b.x + b.w / 2, y: b.y + b.h / 2, r: Math.min(b.w, b.h) * 0.6, t: 0 }); buzz(6); b.fn(); return; }
   }
   try { cv.setPointerCapture(e.pointerId); } catch (err) {}
   onDown(p.x, p.y);
