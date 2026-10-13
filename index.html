@@ -1,0 +1,814 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Cube Out</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #e9e1d2; overflow: hidden; overscroll-behavior: none; }
+  body {
+    height: 100vh; height: 100dvh; box-sizing: border-box;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+
+/* =====================================================================
+   CUBE OUT  -  prototype (working title)
+
+   Grid levels in the spirit of Gecko Out. Every cube has a color and one
+   exit hole of that color. Drag a cube through the grid: it paints each tile
+   it steps on, and its paint trail has a length that differs per cube (older
+   paint fades behind it). If a cube steps onto paint of another color, the
+   colors mix like paint (red+yellow=orange, red+blue=purple, yellow+blue=green).
+   Cubes block each other. A cube leaves through a hole of its current color,
+   and its paint disappears with it. There is no timer.
+   ===================================================================== */
+
+// Colors are sets of the three primaries: red = 1, yellow = 2, blue = 4. Mixing is a bitwise OR.
+const PAL = {
+  1: { n: 'Red',    c: '#f2475f', l: '#ff9fae', d: '#a3203a' },
+  2: { n: 'Yellow', c: '#ffc82e', l: '#ffe58a', d: '#c98f00' },
+  4: { n: 'Blue',   c: '#3f8cff', l: '#9ccaff', d: '#1d4fb3' },
+  3: { n: 'Orange', c: '#ff8a2b', l: '#ffc48f', d: '#c4570a' },
+  5: { n: 'Purple', c: '#a55cf3', l: '#d4aaff', d: '#6a2fb5' },
+  6: { n: 'Green',  c: '#2fcf6b', l: '#9af0b9', d: '#14803a' },
+  7: { n: 'Brown',  c: '#8d5b3a', l: '#c39475', d: '#4f301c' },
+  8: { n: 'Rainbow', c: '#ff7ac8', l: '#ffc2e6', d: '#b3328a' },
+};
+
+// ==LOGIC START==
+// The rules. No drawing in here, so a level checker can run the very same code.
+// Colors are bits (red 1, yellow 2, blue 4); mixing is OR. RAINBOW (8) is a cube with a different color on each pair of faces:
+// the face that lands on a tile paints it, it cannot be mixed, and it leaves through the rainbow hole in any orientation.
+const RAINBOW = 8;
+// faces: [down, up, north, south, east, west] -> colors
+const RB_FACES = [1, 1, 2, 2, 4, 4];
+function rollFaces(f, dc, dr) {
+  const [D, U, N, S, E, W] = f;
+  if (dc === 1) return [E, W, N, S, U, D];         // east face goes down, up face goes east
+  if (dc === -1) return [W, E, N, S, D, U];
+  if (dr === 1) return [S, N, D, U, E, W];         // south face goes down, up face goes south
+  return [N, S, U, D, E, W];                       // north
+}
+function makeState(L) {
+  const cols = L.cols, rows = L.rows, n = cols * rows;
+  const walls = new Uint8Array(n);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) if (L.map[r][c] === '#') walls[r * cols + c] = 1;
+  // map letters: # wall, x cracked tile (becomes a pit once a cube has stepped off it). Gates and wells come as lists.
+  const cracked = new Uint8Array(n), gate = new Uint8Array(n), well = new Uint8Array(n);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) if (L.map[r][c] === 'x') cracked[r * cols + c] = 1;
+  (L.gates || []).forEach(g => { gate[g.r * cols + g.c] = g.col; });      // only a cube of exactly this color may enter
+  (L.wells || []).forEach(w => { well[w.r * cols + w.c] = w.col; });      // stepping in dyes the cube, like paint that never runs out
+  const s = { cols, rows, walls, cracked, gate, well, broken: new Uint8Array(n), paint: new Uint8Array(n), owner: new Int8Array(n), cubes: [], holes: [] };
+  L.cubes.forEach((q, i) => {
+    const idx = q.r * cols + q.c;
+    const f = q.col === RAINBOW ? RB_FACES.slice() : null;
+    s.cubes.push({ c: q.c, r: q.r, col: q.col, len: q.len, trail: [idx], done: 0, f });
+    s.paint[idx] = f ? f[0] : q.col; s.owner[idx] = i + 1;
+  });
+  L.holes.forEach(h => s.holes.push({ c: h.c, r: h.r, col: h.col, filled: 0 }));
+  return s;
+}
+function cloneState(s) {
+  return {
+    cols: s.cols, rows: s.rows, walls: s.walls, cracked: s.cracked, gate: s.gate, well: s.well, broken: s.broken.slice(), paint: s.paint.slice(), owner: s.owner.slice(),
+    cubes: s.cubes.map(q => ({ c: q.c, r: q.r, col: q.col, len: q.len, trail: q.trail.slice(), done: q.done, f: q.f ? q.f.slice() : null })),
+    holes: s.holes.map(h => ({ c: h.c, r: h.r, col: h.col, filled: h.filled })),
+  };
+}
+function holeAt(s, c, r) { for (const h of s.holes) if (h.c === c && h.r === r) return h; return null; }
+function cubeAt(s, c, r) { for (let j = 0; j < s.cubes.length; j++) { const o = s.cubes[j]; if (!o.done && o.c === c && o.r === r) return j; } return -1; }
+
+// Can cube i step by (dc, dr)? Walls, other cubes, and holes of another color (or already used) block it.
+function canMove(s, i, dc, dr) {
+  const q = s.cubes[i];
+  if (q.done) return false;
+  const nc = q.c + dc, nr = q.r + dr;
+  if (nc < 0 || nr < 0 || nc >= s.cols || nr >= s.rows) return false;
+  const ni = nr * s.cols + nc;
+  if (s.walls[ni] || s.broken[ni]) return false;
+  if (s.gate[ni] && q.col !== s.gate[ni]) return false;
+  if (cubeAt(s, nc, nr) >= 0) return false;
+  const h = holeAt(s, nc, nr);
+  if (h && (h.filled || h.col !== q.col)) return false;
+  return true;
+}
+
+// Step cube i. Returns null if illegal, otherwise what happened. Mutates s.
+function move(s, i, dc, dr) {
+  if (!canMove(s, i, dc, dr)) return null;
+  const q = s.cubes[i];
+  const nc = q.c + dc, nr = q.r + dr, idx = nr * s.cols + nc, old = q.r * s.cols + q.c;
+  const h = holeAt(s, nc, nr);
+  const crack = () => { if (s.cracked[old] && !s.broken[old]) { s.broken[old] = 1; s.paint[old] = 0; s.owner[old] = 0; return old; } return -1; };
+  if (h) {                                     // leaves through its hole; its paint disappears with it
+    h.filled = 1; q.done = 1; q.c = nc; q.r = nr; q.trail = [];
+    const cleared = [];
+    for (let t = 0; t < s.paint.length; t++) if (s.owner[t] === i + 1) { cleared.push(t); s.paint[t] = 0; s.owner[t] = 0; }
+    return { entered: true, hole: h, cleared, broke: crack() };
+  }
+  const before = q.col, p = s.paint[idx];
+  const w = s.well[idx];
+  if (q.f) q.f = rollFaces(q.f, dc, dr);       // rainbow: the cube tumbles, the face that lands paints, nothing mixes it
+  else if (w) q.col = q.col | w;               // a well dyes the cube
+  else if (p) q.col = q.col | p;               // stepping onto paint mixes the colors
+  q.c = nc; q.r = nr;
+  if (!w) { s.paint[idx] = q.f ? q.f[0] : q.col; s.owner[idx] = i + 1; }   // wells keep their own color
+  q.trail.push(idx);
+  const cleared = [];
+  if (q.trail.length > q.len) {                // the oldest paint fades
+    const drop = q.trail.shift();
+    if (!q.trail.includes(drop) && s.owner[drop] === i + 1) { s.paint[drop] = 0; s.owner[drop] = 0; cleared.push(drop); }
+  }
+  const broke = crack();                         // the tile it just left breaks if it was cracked
+  return { entered: false, mixed: q.col !== before, from: before, to: q.col, painted: idx, overwrote: p, cleared, face: q.f ? q.f[0] : 0, well: !!w, broke };
+}
+function isWon(s) { return s.cubes.every(q => q.done); }
+function stateKey(s) {
+  let k = '';
+  for (const q of s.cubes) k += q.done ? 'D;' : q.c + ',' + q.r + ',' + q.col + (q.f ? 'f' + q.f[0] + q.f[2] + q.f[4] : '') + ',' + q.trail.join('.') + ';';
+  for (let i = 0; i < s.paint.length; i++) if (s.paint[i]) k += i + ':' + s.paint[i] + s.owner[i] + ';';
+  for (let i = 0; i < s.broken.length; i++) if (s.broken[i]) k += 'b' + i + ';';
+  for (const h of s.holes) k += h.filled ? '1' : '0';
+  return k;
+}
+
+// ---- Solver (A*). Used to prove a level can be won, and by the game to notice when the player is stuck. ----
+const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+function distToAnyHole(s) {
+  const n = s.cols * s.rows, d = new Int32Array(n).fill(-1), q = [];
+  for (const h of s.holes) { const i = h.r * s.cols + h.c; if (d[i] < 0) { d[i] = 0; q.push(i); } }
+  for (let k = 0; k < q.length; k++) {
+    const i = q[k], c = i % s.cols, r = (i / s.cols) | 0;
+    for (const [dc, dr] of DIRS4) {
+      const nc = c + dc, nr = r + dr;
+      if (nc < 0 || nr < 0 || nc >= s.cols || nr >= s.rows) continue;
+      const j = nr * s.cols + nc;
+      if (s.walls[j] || d[j] >= 0) continue;
+      d[j] = d[i] + 1; q.push(j);
+    }
+  }
+  return d;
+}
+function MinHeap() {
+  const a = [];
+  return {
+    get size() { return a.length; },
+    push(f, v) { a.push([f, v]); let i = a.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (a[p][0] <= a[i][0]) break; [a[p], a[i]] = [a[i], a[p]]; i = p; } },
+    pop() { const top = a[0], last = a.pop(); if (a.length) { a[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < a.length && a[l][0] < a[m][0]) m = l; if (r < a.length && a[r][0] < a[m][0]) m = r; if (m === i) break; [a[m], a[i]] = [a[i], a[m]]; i = m; } } return top; },
+  };
+}
+// Returns { status: 'solved', steps, path } | { status: 'stuck' } (searched everything, no way out) | { status: 'unknown' } (gave up at cap).
+function solveFrom(s0, cap) {
+  const dist = distToAnyHole(s0);
+  const hq = s => { let t = 0; for (const q of s.cubes) if (!q.done) { const d = dist[q.r * s.cols + q.c]; if (d < 0) return 1e9; t += d; } return t; };
+  const key0 = stateKey(s0);
+  const keys = [key0], states = [s0], g = [0], parent = [-1], mv = [null], best = new Map([[key0, 0]]);
+  const heap = MinHeap(); heap.push(hq(s0), 0);
+  let expanded = 0;
+  while (heap.size) {
+    const idx = heap.pop()[1], s = states[idx];
+    if (!s || g[idx] > best.get(keys[idx])) continue;
+    if (isWon(s)) {
+      const path = []; for (let k = idx; parent[k] >= 0; k = parent[k]) path.push(mv[k]);
+      return { status: 'solved', steps: g[idx], path: path.reverse(), expanded };
+    }
+    if (++expanded > cap) return { status: 'unknown', expanded };
+    for (let i = 0; i < s.cubes.length; i++) {
+      if (s.cubes[i].done) continue;
+      for (const [dc, dr] of DIRS4) {
+        if (!canMove(s, i, dc, dr)) continue;
+        const t = cloneState(s); move(t, i, dc, dr);
+        const key = stateKey(t), ng = g[idx] + 1, old = best.get(key);
+        if (old !== undefined && old <= ng) continue;
+        best.set(key, ng);
+        keys.push(key); states.push(t); g.push(ng); parent.push(idx); mv.push([i, dc, dr]);
+        heap.push(ng + hq(t), states.length - 1);
+      }
+    }
+    states[idx] = null;
+  }
+  return { status: 'stuck', expanded };
+}
+// ==LOGIC END==
+
+// ==LEVELS START==
+const LEVELS = [
+  { name: "Passing bay", cols: 5, rows: 3, map: ["##.##",".....","##.##"],
+    cubes: [{ c: 1, r: 1, col: 1, len: 3 }, { c: 3, r: 1, col: 4, len: 1 }], holes: [{ c: 4, r: 1, col: 1 }, { c: 0, r: 1, col: 4 }] },
+  { name: "Borrowed color", cols: 4, rows: 4, map: ["....",".#..","..#.","...."],
+    cubes: [{ c: 0, r: 2, col: 1, len: 2 }, { c: 1, r: 2, col: 2, len: 2 }], holes: [{ c: 1, r: 3, col: 2 }, { c: 1, r: 0, col: 3 }] },
+  { name: "Crossroads", cols: 5, rows: 5, map: ["##.##","##.##",".....","##.##","##.##"],
+    cubes: [{ c: 1, r: 2, col: 1, len: 3 }, { c: 3, r: 2, col: 2, len: 3 }, { c: 2, r: 1, col: 4, len: 1 }], holes: [{ c: 4, r: 2, col: 1 }, { c: 0, r: 2, col: 2 }, { c: 2, r: 4, col: 4 }] },
+  { name: "Chain", cols: 5, rows: 5, map: [".....",".###.",".....",".###.","....."],
+    cubes: [{ c: 1, r: 2, col: 1, len: 2 }, { c: 2, r: 2, col: 2, len: 2 }, { c: 3, r: 2, col: 4, len: 2 }], holes: [{ c: 0, r: 0, col: 1 }, { c: 4, r: 2, col: 4 }, { c: 0, r: 4, col: 6 }] },
+  { name: "Painter", cols: 5, rows: 5, map: [".#...",".#.#.","...#.",".##..","....."],
+    cubes: [{ c: 2, r: 1, col: 8, len: 3 }, { c: 0, r: 0, col: 1, len: 2 }], holes: [{ c: 4, r: 3, col: 8 }, { c: 2, r: 0, col: 3 }] },
+  { name: "Dye works", cols: 5, rows: 5, map: [".....",".###.",".....",".###.","....."],
+    cubes: [{ c: 2, r: 4, col: 1, len: 2 }, { c: 3, r: 0, col: 4, len: 3 }], holes: [{ c: 2, r: 2, col: 3 }, { c: 1, r: 0, col: 4 }],
+    wells: [{ c: 4, r: 0, col: 2 }] },
+  { name: "Gatekeeper", cols: 6, rows: 5, map: ["...#..",".#.#..","......",".#.#..","...#.."],
+    cubes: [{ c: 1, r: 4, col: 1, len: 2 }, { c: 2, r: 4, col: 2, len: 3 }], holes: [{ c: 0, r: 3, col: 2 }, { c: 5, r: 1, col: 3 }],
+    gates: [{ c: 3, r: 2, col: 1 }],
+    wells: [{ c: 5, r: 0, col: 2 }] },
+  { name: "Fragile bridge", cols: 5, rows: 5, map: [".#.#.","..x..",".#.#.","..x..",".#.#."],
+    cubes: [{ c: 1, r: 3, col: 1, len: 3 }, { c: 4, r: 4, col: 4, len: 3 }], holes: [{ c: 3, r: 1, col: 1 }, { c: 0, r: 0, col: 4 }] },
+  { name: "Paint shop", cols: 5, rows: 6, map: [".x...",".#.#.",".x.x.",".#.#.","##.##","#...#"],
+    cubes: [{ c: 0, r: 1, col: 1, len: 3 }, { c: 4, r: 3, col: 2, len: 2 }], holes: [{ c: 2, r: 1, col: 2 }, { c: 3, r: 5, col: 7 }],
+    gates: [{ c: 2, r: 4, col: 3 }],
+    wells: [{ c: 2, r: 5, col: 4 }] },
+  { name: "Grand opening", cols: 5, rows: 6, map: [".x...",".#.#.",".x.x.",".#.#.","##.##","#...#"],
+    cubes: [{ c: 2, r: 0, col: 8, len: 4 }, { c: 0, r: 3, col: 1, len: 2 }], holes: [{ c: 2, r: 1, col: 8 }, { c: 3, r: 5, col: 7 }],
+    gates: [{ c: 2, r: 4, col: 3 }],
+    wells: [{ c: 2, r: 5, col: 4 }] },
+];
+// ==LEVELS END==
+
+// ---------- Canvas / layout ----------
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const LW = 390, LH = 844;                       // the board is always this size, scaled to fit the screen
+let W = 0, H = 0, dpr = 1, scale = 1, offX = 0, offY = 0;
+let G = null;
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const rect = cv.getBoundingClientRect();
+  W = Math.max(1, rect.width); H = Math.max(1, rect.height);
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  scale = Math.min(W / LW, H / LH);
+  offX = (W - LW * scale) / 2; offY = (H - LH * scale) / 2;
+}
+
+const mod = (a, n) => ((a % n) + n) % n;
+const hash = n => { const h = Math.sin(n * 12.9898) * 43758.5453; return h - Math.floor(h); };
+const hexRgb = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+function mixHex(a, b, t) {
+  const A = hexRgb(a), B = hexRgb(b);
+  return `rgb(${Math.round(A[0] + (B[0] - A[0]) * t)},${Math.round(A[1] + (B[1] - A[1]) * t)},${Math.round(A[2] + (B[2] - A[2]) * t)})`;
+}
+
+// ---------- Progress (kept in the browser) ----------
+const SAVE_KEY = 'cubeout.v1';
+function loadSave() {
+  try { const o = JSON.parse(localStorage.getItem(SAVE_KEY)); if (o && typeof o.unlocked === 'number') return o; } catch (e) {}
+  return { unlocked: 1, done: {} };
+}
+const SAVE = loadSave();
+function saveSave() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(SAVE)); } catch (e) {} }
+const DEV = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);   // developer shortcuts only on this machine
+const isUnlocked = i => (DEV && new URLSearchParams(location.search).has('level')) || i < SAVE.unlocked;
+
+// ---------- Game ----------
+// A cube's look: where it sits, how it is turned (M, a 3x3 rotation), and the rolls still waiting to play.
+const IDENT = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+const newVis = (q, sc) => ({ x: q.c, y: q.r, M: IDENT.slice(), sc, pop: 0, q: [], anim: null, lift: 0 });
+function loadLevel(i) {
+  const L = LEVELS[i];
+  const s = makeState(L);
+  const n = s.cols * s.rows;
+  G = {
+    level: i, L, s, undo: [], moves: 0, status: 'play', t: 0,
+    pa: new Float32Array(n).fill(1),                // paint fade-in per tile
+    ghosts: [], parts: [], floats: [], buttons: [],
+    vis: s.cubes.map(q => newVis(q, 1)),
+    holePulse: s.holes.map(() => 0),
+    coach: false, stuck: false,
+  };
+  const maxW = LW - 28, maxH = 540;
+  G.ts = Math.floor(Math.min(maxW / s.cols, maxH / s.rows, 76));
+  G.bw = G.ts * s.cols; G.bh = G.ts * s.rows;
+  G.bx = (LW - G.bw) / 2; G.by = 104 + (maxH - G.bh) / 2;
+}
+
+function toTile(x, y) {
+  const c = Math.floor((x - G.bx) / G.ts), r = Math.floor((y - G.by) / G.ts);
+  return (c < 0 || r < 0 || c >= G.s.cols || r >= G.s.rows) ? null : { c, r };
+}
+const cx = c => G.bx + (c + 0.5) * G.ts, cy = r => G.by + (r + 0.5) * G.ts;
+
+function burst(x, y, cols, n, speed = 120) {
+  for (let k = 0; k < n; k++) {
+    const a = hash(k + G.t * 7 + 1) * Math.PI * 2, v = speed * (0.4 + hash(k + 99 + G.t) * 0.8);
+    G.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 40, life: 0.7 + hash(k + 5) * 0.3, t: 0, col: cols[k % cols.length], r: 3 + hash(k + 11) * 3 });
+  }
+}
+function floatText(x, y, text, color) { G.floats.push({ x, y, text, color, t: 0 }); }
+
+// One step of one cube, with all the visual consequences.
+function stepCube(i, dc, dr) {
+  const s = G.s;
+  const prevPaint = s.paint.slice();
+  const res = move(s, i, dc, dr);
+  if (!res) return false;
+  const q = s.cubes[i], v = G.vis[i];
+  v.q.push({ dc, dr });
+  for (let t = 0; t < s.paint.length; t++) {
+    if (prevPaint[t] > 0 && s.paint[t] === 0) G.ghosts.push({ idx: t, col: prevPaint[t], t: 0 });
+    else if (s.paint[t] > 0 && s.paint[t] !== prevPaint[t]) G.pa[t] = 0;
+  }
+  if (res.broke >= 0) burst(cx(res.broke % s.cols), cy((res.broke / s.cols) | 0), ['#8b8272', '#b5ad9c', '#6c6454'], 10, 90);
+  if (res.entered) {
+    const hi = s.holes.indexOf(res.hole);
+    G.holePulse[hi] = 1;
+    burst(cx(q.c), cy(q.r), [PAL[res.hole.col].c, PAL[res.hole.col].l, '#ffffff'], 18, 150);
+    floatText(cx(q.c), cy(q.r) - 20, 'Out!', PAL[res.hole.col].d);
+    if (isWon(s)) { G.status = 'won'; G.wonT = 0; SAVE.done[G.level] = true; SAVE.unlocked = Math.max(SAVE.unlocked, G.level + 2); saveSave(); }
+  } else if (res.mixed) {
+    v.pop = 1;
+    burst(cx(q.c), cy(q.r), [PAL[res.from].c, PAL[res.overwrote || s.well[res.painted] || res.to].c, PAL[res.to].c], 16, 130);
+    floatText(cx(q.c), cy(q.r) - 24, PAL[res.to].n + '!', PAL[res.to].d);
+  }
+  return true;
+}
+
+function snapshot() { return { s: cloneState(G.s), moves: G.moves }; }
+function restore(snap) {
+  G.stuck = false;
+  G.s = cloneState(snap.s); G.moves = snap.moves;
+  G.pa.fill(1); G.ghosts = []; G.parts = []; G.floats = [];
+  G.vis = G.s.cubes.map(q => newVis(q, q.done ? 0 : 1));
+  G.status = 'play';
+}
+function undo() {
+  if (G.status !== 'play' && G.status !== 'won') return;
+  if (!G.undo.length) return;
+  restore(G.undo.pop());
+  G.stuck = false;
+}
+
+// ---------- Input: drag a cube along your finger ----------
+let drag = null;
+function onDown(x, y) {
+  if (G.status !== 'play') return;
+  const t = toTile(x, y);
+  if (!t) return;
+  const i = cubeAt(G.s, t.c, t.r);
+  if (i < 0) return;
+  drag = { i, lx: x, ly: y, moved: false, snap: snapshot() };
+  G.coach = false;
+}
+function followTile(x, y) {
+  const t = toTile(x, y);
+  if (!t || !drag) return;
+  const q = G.s.cubes[drag.i];
+  if (q.done) return;
+  const dc = t.c - q.c, dr = t.r - q.r;
+  if (dc === 0 && dr === 0) return;
+  if (Math.abs(dc) + Math.abs(dr) === 1) { if (stepCube(drag.i, dc, dr)) drag.moved = true; return; }
+  if (Math.abs(dc) === 1 && Math.abs(dr) === 1) {          // finger cut a corner: go around it through a free tile
+    const first = canMove(G.s, drag.i, dc, 0) ? [dc, 0, 0, dr] : canMove(G.s, drag.i, 0, dr) ? [0, dr, dc, 0] : null;
+    if (first && stepCube(drag.i, first[0], first[1])) { drag.moved = true; if (stepCube(drag.i, first[2], first[3])) drag.moved = true; }
+  }
+}
+function onMove(x, y) {
+  if (!drag) return;
+  const dx = x - drag.lx, dy = y - drag.ly, n = Math.max(1, Math.ceil(Math.hypot(dx, dy) / (G.ts * 0.25)));
+  for (let k = 1; k <= n; k++) followTile(drag.lx + dx * k / n, drag.ly + dy * k / n);
+  drag.lx = x; drag.ly = y;
+}
+function onUp() {
+  if (drag && drag.moved) {
+    G.undo.push(drag.snap); G.moves++;
+    const lvl = G.level;
+    setTimeout(() => {                                     // is there still a way to win from here?
+      if (!G || G.level !== lvl || G.status !== 'play') return;
+      G.stuck = solveFrom(cloneState(G.s), 40000).status === 'stuck';
+    }, 40);
+  }
+  drag = null;
+}
+
+// ---------- Drawing helpers ----------
+function font(size, weight = 700) { ctx.font = `${weight} ${size}px ui-rounded, "SF Pro Rounded", system-ui, -apple-system, sans-serif`; }
+function txt(s, x, y, size, color, align = 'center', weight = 700, outline = null) {
+  font(size, weight); ctx.textAlign = align; ctx.textBaseline = 'middle';
+  if (outline) { ctx.lineWidth = 4; ctx.strokeStyle = outline; ctx.lineJoin = 'round'; ctx.strokeText(s, x, y); }
+  ctx.fillStyle = color; ctx.fillText(s, x, y);
+}
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+
+function glossBtn(x, y, w, h, r, base) {
+  ctx.save();
+  ctx.shadowColor = 'rgba(40,30,10,0.25)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 3;
+  rr(x, y + 2, w, h - 2, r); ctx.fillStyle = mixHex(base, '#000000', 0.35); ctx.fill();
+  ctx.restore();
+  const g = ctx.createLinearGradient(0, y, 0, y + h - 3);
+  g.addColorStop(0, mixHex(base, '#ffffff', 0.4)); g.addColorStop(1, base);
+  rr(x, y, w, h - 3, r); ctx.fillStyle = g; ctx.fill();
+  rr(x + 3, y + 2, w - 6, (h - 3) * 0.42, r - 2); ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.fill();
+  rr(x, y, w, h - 3, r); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.stroke();
+}
+
+function drawBackground() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#f6f0e4'); g.addColorStop(1, '#e6dccb');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // soft confetti dots so the page doesn't feel flat
+  for (let k = 0; k < 26; k++) {
+    const x = hash(k + 1) * W, y = hash(k + 50) * H, col = PAL[[1, 2, 4, 3, 5, 6][k % 6]];
+    ctx.globalAlpha = 0.10; ctx.fillStyle = col.c; ctx.beginPath(); ctx.arc(x, y, 6 + hash(k + 90) * 14, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawBoard() {
+  const s = G.s, ts = G.ts;
+  // tray
+  ctx.save();
+  ctx.shadowColor = 'rgba(60,40,10,0.30)'; ctx.shadowBlur = 22; ctx.shadowOffsetY = 8;
+  rr(G.bx - 12, G.by - 12, G.bw + 24, G.bh + 24, 22); ctx.fillStyle = '#3b4658'; ctx.fill();
+  ctx.restore();
+  rr(G.bx - 12, G.by - 12, G.bw + 24, G.bh + 24, 22); ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.stroke();
+  // floor
+  for (let r = 0; r < s.rows; r++) for (let c = 0; c < s.cols; c++) {
+    const x = G.bx + c * ts, y = G.by + r * ts, i = r * s.cols + c;
+    if (s.walls[i]) continue;
+    if (s.broken[i]) { drawPit(c, r); continue; }
+    rr(x + 1, y + 1, ts - 2, ts - 2, ts * 0.16); ctx.fillStyle = (c + r) % 2 ? '#f1ece0' : '#e8e2d4'; ctx.fill();
+    if (s.cracked[i]) drawCracks(c, r);
+  }
+  // paint (and paint that is fading away)
+  for (const gh of G.ghosts) drawPaintTile(gh.idx, gh.col, Math.max(0, 1 - gh.t / 0.3) * 0.9);
+  for (let i = 0; i < s.paint.length; i++) if (s.paint[i]) drawPaintTile(i, s.paint[i], Math.min(1, G.pa[i]));
+  // wells and gates
+  for (let i = 0; i < s.well.length; i++) {
+    if (s.well[i]) drawWell(i % s.cols, (i / s.cols) | 0, s.well[i]);
+    if (s.gate[i]) drawGate(i % s.cols, (i / s.cols) | 0, s.gate[i]);
+  }
+  // holes
+  s.holes.forEach((h, hi) => drawHole(h, G.holePulse[hi]));
+  // walls
+  for (let r = 0; r < s.rows; r++) for (let c = 0; c < s.cols; c++) if (s.walls[r * s.cols + c]) drawWall(c, r);
+}
+function drawPaintTile(idx, col, a) {
+  const s = G.s, ts = G.ts, c = idx % s.cols, r = Math.floor(idx / s.cols);
+  const x = G.bx + c * ts, y = G.by + r * ts, P = PAL[col], m = ts * 0.06;
+  ctx.globalAlpha = a;
+  rr(x + m, y + m, ts - 2 * m, ts - 2 * m, ts * 0.2);
+  const g = ctx.createLinearGradient(0, y, 0, y + ts); g.addColorStop(0, P.l); g.addColorStop(1, P.c);
+  ctx.fillStyle = g; ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = P.d; ctx.globalAlpha = a * 0.45; ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+function drawHole(h, pulse) {
+  const ts = G.ts, x = cx(h.c), y = cy(h.r), P = PAL[h.col], R = ts * 0.44 * (1 + pulse * 0.15);
+  ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.fillStyle = P.d; ctx.fill();
+  ctx.beginPath(); ctx.arc(x, y, R * 0.9, 0, Math.PI * 2);
+  if (h.col === 8 && ctx.createConicGradient) {     // the rainbow hole has a ring of every color
+    const cg = ctx.createConicGradient(-Math.PI / 2, x, y);
+    ['#f2475f', '#ff8a2b', '#ffc82e', '#2fcf6b', '#3f8cff', '#a55cf3', '#f2475f'].forEach((c, k) => cg.addColorStop(k / 6, c));
+    ctx.fillStyle = cg;
+  } else ctx.fillStyle = P.c;
+  ctx.fill();
+  const g = ctx.createRadialGradient(x, y - R * 0.2, R * 0.1, x, y, R * 0.7);
+  g.addColorStop(0, '#2a2f3c'); g.addColorStop(1, '#0e1118');
+  ctx.beginPath(); ctx.arc(x, y, R * 0.68, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
+  ctx.beginPath(); ctx.arc(x, y, R * 0.9, Math.PI * 1.1, Math.PI * 1.7); ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.stroke();
+  if (h.filled) {                                   // the plug that closes a used hole
+    ctx.beginPath(); ctx.arc(x, y, R * 0.68, 0, Math.PI * 2); ctx.fillStyle = P.l; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = P.d; ctx.stroke();
+    txt('✓', x, y + 1, ts * 0.38, P.d, 'center', 800);
+  }
+}
+function drawPit(c, r) {
+  const ts = G.ts, x = G.bx + c * ts, y = G.by + r * ts;
+  rr(x + 1, y + 1, ts - 2, ts - 2, ts * 0.16); ctx.fillStyle = '#2b3342'; ctx.fill();
+  const g = ctx.createLinearGradient(0, y, 0, y + ts); g.addColorStop(0, 'rgba(0,0,0,0.55)'); g.addColorStop(1, 'rgba(0,0,0,0.15)');
+  rr(x + 1, y + 1, ts - 2, ts - 2, ts * 0.16); ctx.fillStyle = g; ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';                       // a few chips on the rim
+  for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.arc(x + ts * (0.2 + 0.3 * k), y + ts * (k % 2 ? 0.86 : 0.12), ts * 0.04, 0, 7); ctx.fill(); }
+}
+function drawCracks(c, r) {
+  const ts = G.ts, x = G.bx + c * ts, y = G.by + r * ts, h0 = hash(c * 17 + r * 31 + 3);
+  ctx.save(); rr(x + 1, y + 1, ts - 2, ts - 2, ts * 0.16); ctx.clip();
+  ctx.fillStyle = 'rgba(120,100,60,0.12)'; ctx.fillRect(x, y, ts, ts);
+  ctx.strokeStyle = 'rgba(70,55,30,0.7)'; ctx.lineWidth = Math.max(1.5, ts * 0.035); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const a = [[0.50 + h0 * 0.1, 0.02], [0.38, 0.28], [0.58, 0.45], [0.44, 0.66], [0.56 - h0 * 0.1, 0.98]];
+  ctx.beginPath(); a.forEach(([u, v], k) => k ? ctx.lineTo(x + u * ts, y + v * ts) : ctx.moveTo(x + u * ts, y + v * ts)); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + 0.58 * ts, y + 0.45 * ts); ctx.lineTo(x + 0.84 * ts, y + 0.54 * ts); ctx.lineTo(x + 0.98 * ts, y + 0.5 * ts);
+  ctx.moveTo(x + 0.38 * ts, y + 0.28 * ts); ctx.lineTo(x + 0.14 * ts, y + 0.2 * ts); ctx.stroke();
+  ctx.restore();
+}
+function drawWell(c, r, col) {
+  const ts = G.ts, x = cx(c), y = cy(r), P = PAL[col], R0 = ts * 0.4, wob = Math.sin(G.t * 3 + c * 2 + r) * ts * 0.012;
+  ctx.beginPath(); ctx.ellipse(x, y + ts * 0.06, R0 * 1.05, R0 * 0.95, 0, 0, 7); ctx.fillStyle = 'rgba(40,30,10,0.18)'; ctx.fill();
+  ctx.beginPath(); ctx.arc(x, y, R0 + wob, 0, 7); ctx.fillStyle = P.d; ctx.fill();
+  const g = ctx.createRadialGradient(x - R0 * 0.25, y - R0 * 0.3, R0 * 0.1, x, y, R0);
+  g.addColorStop(0, P.l); g.addColorStop(1, P.c);
+  ctx.beginPath(); ctx.arc(x, y, R0 * 0.86 + wob, 0, 7); ctx.fillStyle = g; ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x - R0 * 0.28, y - R0 * 0.38, R0 * 0.3, R0 * 0.15, -0.5, 0, 7); ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fill();
+  const b = (G.t * 0.7 + c * 0.37 + r * 0.21) % 1;                 // a bubble rises and pops
+  ctx.beginPath(); ctx.arc(x + R0 * 0.3, y + R0 * 0.35 - b * R0 * 0.5, R0 * 0.09 * (1 - b * 0.4), 0, 7); ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1.5; ctx.stroke();
+}
+function drawGate(c, r, col) {
+  const ts = G.ts, x = G.bx + c * ts, y = G.by + r * ts, P = PAL[col], m = ts * 0.07;
+  rr(x + m, y + m, ts - 2 * m, ts - 2 * m, ts * 0.18); ctx.fillStyle = mixHex('#ffffff', P.l, 0.45); ctx.fill();
+  ctx.lineWidth = Math.max(3, ts * 0.07); ctx.strokeStyle = P.d; ctx.stroke();
+  const bars = 3;                                                  // vertical bars of the gate
+  for (let k = 0; k < bars; k++) {
+    const bx = x + ts * (0.28 + k * 0.22);
+    rr(bx - ts * 0.04, y + ts * 0.16, ts * 0.08, ts * 0.68, ts * 0.04); ctx.fillStyle = P.c; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = P.d; ctx.stroke();
+  }
+  rr(x + ts * 0.2, y + ts * 0.42, ts * 0.6, ts * 0.16, ts * 0.05); ctx.fillStyle = P.d; ctx.fill();   // crossbar
+}
+function drawWall(c, r) {
+  const ts = G.ts, x = G.bx + c * ts, y = G.by + r * ts;
+  rr(x + 1, y + 3, ts - 2, ts - 2, ts * 0.16); ctx.fillStyle = '#232b39'; ctx.fill();
+  const g = ctx.createLinearGradient(0, y, 0, y + ts); g.addColorStop(0, '#5a6a82'); g.addColorStop(1, '#46556b');
+  rr(x + 1, y, ts - 2, ts - 4, ts * 0.16); ctx.fillStyle = g; ctx.fill();
+  rr(x + 5, y + 3, ts - 10, ts * 0.22, ts * 0.1); ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.fill();
+}
+
+// A real 3D cube: eight corners turned by M, only the faces that look at the camera are painted.
+const EL = { s: 0.88, c: 0.475 };                  // camera tilt: a little less than straight down
+const FACES = (() => {
+  const out = [];
+  for (let ax = 0; ax < 3; ax++) for (const sg of [-1, 1]) {
+    const b = (ax + 1) % 3, c = (ax + 2) % 3, n = [0, 0, 0]; n[ax] = sg;
+    const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, w]) => { const p = [0, 0, 0]; p[ax] = sg; p[b] = u; p[c] = w; return p; });
+    out.push({ n, pts, idx: ax * 2 + (sg > 0 ? 1 : 0) });
+  }
+  return out;
+})();
+const mulM = (M, p) => [M[0] * p[0] + M[1] * p[1] + M[2] * p[2], M[3] * p[0] + M[4] * p[1] + M[5] * p[2], M[6] * p[0] + M[7] * p[1] + M[8] * p[2]];
+function rotM(ax, ay, az, th) {                   // rotation about a unit axis (Rodrigues)
+  const c = Math.cos(th), s = Math.sin(th), t = 1 - c;
+  return [t * ax * ax + c, t * ax * ay - s * az, t * ax * az + s * ay,
+          t * ax * ay + s * az, t * ay * ay + c, t * ay * az - s * ax,
+          t * ax * az - s * ay, t * ay * az + s * ax, t * az * az + c];
+}
+const mulMM = (A, B) => { const o = []; for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) o.push(A[r * 3] * B[c] + A[r * 3 + 1] * B[3 + c] + A[r * 3 + 2] * B[6 + c]); return o; };
+const LIGHT = [-0.35, -0.45, 0.82];
+
+// gx, gy: where the cube's footprint centre is on screen; lift: height of the cube's underside above the floor (px)
+function drawCube(gx, gy, S, col, M, lift, alpha, len, showDots) {
+  const half = S / 2, RB_COLS = [4, 4, 2, 2, 1, 1];   // a rainbow cube: blue sides, yellow ends, red top and bottom
+  ctx.save(); ctx.globalAlpha = alpha;
+  // shadow on the floor (shrinks and fades as the cube tips up)
+  const sh = Math.max(0.55, 1 - lift / S * 0.9);
+  ctx.beginPath(); ctx.ellipse(gx, gy + S * 0.04, S * 0.52 * sh, S * 0.34 * sh, 0, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(30,20,10,${0.26 * sh})`; ctx.fill();
+  const cy = gy - (half + lift) * EL.c;
+  const faces = [];
+  for (const f of FACES) {
+    const n = mulM(M, f.n), vis = n[1] * EL.c + n[2] * EL.s;
+    if (vis <= 0.001) continue;
+    faces.push({ f, n, vis });
+  }
+  faces.sort((a, b) => a.vis - b.vis);
+  ctx.lineJoin = 'round';
+  let best = null;
+  for (const { f, n, vis } of faces) {
+    const poly = f.pts.map(p => { const w = mulM(M, p); return [gx + w[0] * half, cy + w[1] * half * EL.s - w[2] * half * EL.c]; });
+    const P = PAL[col === 8 ? RB_COLS[f.idx] : col];
+    const lam = n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2];
+    const t = Math.max(0, Math.min(1, (lam + 0.25) / 1.15));
+    ctx.beginPath(); poly.forEach((p, k) => k ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath();
+    ctx.fillStyle = mixHex(P.d, P.l, t); ctx.fill();
+    ctx.lineWidth = Math.max(2, S * 0.1); ctx.strokeStyle = mixHex(P.d, P.c, t * 0.8); ctx.stroke();
+    // the face's own soft panel
+    const cxp = poly.reduce((a, p) => a + p[0], 0) / 4, cyp = poly.reduce((a, p) => a + p[1], 0) / 4;
+    ctx.beginPath(); poly.forEach((p, k) => { const x = cxp + (p[0] - cxp) * 0.72, y = cyp + (p[1] - cyp) * 0.72; k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath();
+    ctx.fillStyle = mixHex(P.d, P.l, Math.min(1, t + 0.12)); ctx.globalAlpha = alpha * 0.55; ctx.fill(); ctx.globalAlpha = alpha;
+    if (!best || vis > best.vis) best = { vis, cx: cxp, cy: cyp };
+  }
+  // one small dot per tile of paint this cube leaves behind, on the face that looks up most
+  if (showDots && best) {
+    const n = Math.min(len || 0, 6), dgap = S * 0.15;
+    for (let k = 0; k < n; k++) {
+      ctx.beginPath(); ctx.arc(best.cx + (k - (n - 1) / 2) * dgap, best.cy, S * 0.045, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+function drawCubes() {
+  const s = G.s, ts = G.ts;
+  const order = s.cubes.map((q, i) => i).sort((a, b) => G.vis[a].y - G.vis[b].y);
+  for (const i of order) {
+    const v = G.vis[i], q = s.cubes[i];
+    if (v.sc <= 0.02) continue;
+    const S = ts * 0.74 * v.sc * (1 + v.pop * 0.22);
+    const settled = !v.anim && !v.q.length && v.sc > 0.99;
+    drawCube(G.bx + (v.x + 0.5) * ts, G.by + (v.y + 0.5) * ts + ts * 0.18, S, q.col, v.M, v.lift * ts, v.sc > 0.99 ? 1 : v.sc, q.len, settled);
+  }
+}
+
+function drawEffects() {
+  for (const p of G.parts) {
+    const k = p.t / p.life; ctx.globalAlpha = Math.max(0, 1 - k);
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (1 - k * 0.4), 0, 7); ctx.fillStyle = p.col; ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  for (const f of G.floats) {
+    ctx.globalAlpha = Math.max(0, 1 - f.t * f.t * 0.9);
+    txt(f.text, f.x, f.y - f.t * 36, 20, f.color, 'center', 800, 'rgba(255,255,255,0.95)');
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawHud() {
+  txt('Level ' + (G.level + 1), 20, 36, 26, '#3a3224', 'left', 800);
+  txt(G.L.name || '', 20, 62, 14, '#8a7d66', 'left', 700);
+  const bs = 46, by = 20;
+  const bx = [LW - 20 - bs, LW - 20 - bs * 2 - 10, LW - 20 - bs * 3 - 20];
+  const defs = [['☰', '#8a99b3', openSelect], ['↻', '#f0a62b', () => loadLevel(G.level)], ['↶', G.undo.length ? '#f0a62b' : '#bdb4a2', undo]];
+  defs.forEach(([icon, col, fn], k) => {
+    glossBtn(bx[k], by, bs, bs, 14, col);
+    txt(icon, bx[k] + bs / 2, by + bs / 2 - 2, 24, '#2f2410', 'center', 700);
+    G.buttons.push({ x: bx[k] - 4, y: by - 4, w: bs + 8, h: bs + 8, fn });
+  });
+  txt(`Moves ${G.moves}`, LW / 2, 86, 14, '#8a7d66', 'center', 700);
+}
+
+// How colors mix, always on screen: it is the whole puzzle.
+function drawLegend() {
+  const y = LH - 112;
+  rr(20, y, LW - 40, 78, 20); ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(120,100,60,0.2)'; ctx.stroke();
+  txt('Stepping on another color’s paint mixes the two', LW / 2, y + 17, 13, '#6a5e48', 'center', 700);
+  const eq = [[1, 2, 3], [1, 4, 5], [2, 4, 6]];
+  const ew = (LW - 40) / 3, sq = 17, step = 22;          // [color] + [color] = [color], five items, evenly spaced
+  eq.forEach(([a, b, c], k) => {
+    const x0 = 20 + k * ew + ew / 2, yy = y + 52;
+    const sq1 = (col, x) => { rr(x - sq / 2, yy - sq / 2, sq, sq, 5); ctx.fillStyle = PAL[col].c; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = PAL[col].d; ctx.stroke(); };
+    sq1(a, x0 - step * 2); txt('+', x0 - step, yy + 0.5, 15, '#6a5e48');
+    sq1(b, x0);            txt('=', x0 + step, yy + 0.5, 15, '#6a5e48');
+    sq1(c, x0 + step * 2);
+    if (k < 2) { ctx.fillStyle = 'rgba(120,100,60,0.25)'; ctx.fillRect(20 + (k + 1) * ew - 0.5, y + 38, 1, 28); }
+  });
+}
+
+function drawCoach() {
+  if (!G.coach || G.status !== 'play') return;
+  const q = G.s.cubes[0], h = G.s.holes[0];
+  const t = (Math.sin(G.t * 2.2) + 1) / 2;
+  const x = cx(q.c) + (cx(h.c) - cx(q.c)) * t, y = cy(q.r) + (cy(h.r) - cy(q.r)) * t;
+  ctx.font = '40px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('👆', x + 8, y + 34);
+}
+
+function drawHint() {
+  if (G.stuck && G.status === 'play') {
+    const y = G.by + G.bh + 40;
+    rr(LW / 2 - 150, y - 17, 300, 34, 17); ctx.fillStyle = '#ffe3d6'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#e8794a'; ctx.stroke();
+    txt('No way out from here. Try Undo \u21B6', LW / 2, y + 0.5, 15, '#a3411a', 'center', 800);
+    return;
+  }
+  if (!G.L.hint) return;
+  txt(G.L.hint, LW / 2, G.by + G.bh + 40, 15, '#6a5e48', 'center', 700);
+}
+
+// ---------- Panels ----------
+function panel(x, y, w, h) {
+  ctx.save(); ctx.shadowColor = 'rgba(40,30,10,0.35)'; ctx.shadowBlur = 28; ctx.shadowOffsetY = 10;
+  rr(x, y, w, h, 26); ctx.fillStyle = '#fffaf0'; ctx.fill(); ctx.restore();
+  rr(x, y, w, h, 26); ctx.lineWidth = 3; ctx.strokeStyle = '#e1d4b8'; ctx.stroke();
+}
+function openSelect() { G.prevStatus = G.status; G.status = 'select'; G.page = 0; }
+
+function drawWon() {
+  ctx.fillStyle = 'rgba(40,32,20,0.35)'; ctx.fillRect(-offX / scale - 2, -offY / scale - 2, W / scale + 4, H / scale + 4);
+  const pw = 310, ph = 300, px = (LW - pw) / 2, py = LH / 2 - ph / 2 - 20;
+  panel(px, py, pw, ph);
+  txt('Cleared!', LW / 2, py + 62, 40, '#3a3224', 'center', 800);
+  txt(`${G.moves} move${G.moves === 1 ? '' : 's'}`, LW / 2, py + 108, 18, '#8a7d66', 'center', 700);
+  const hasNext = G.level < LEVELS.length - 1;
+  glossBtn(px + 30, py + 140, pw - 60, 56, 18, '#2fcf6b');
+  txt(hasNext ? 'Next level' : 'Play again', LW / 2, py + 166, 22, '#0f3a1c', 'center', 800);
+  txt('Replay', px + pw * 0.3, py + 238, 16, '#8a7d66', 'center', 700);
+  txt('All levels', px + pw * 0.7, py + 238, 16, '#6a5e48', 'center', 700);
+  G.buttons = [
+    { x: 0, y: 0, w: LW, h: LH, fn: () => {} },
+    { x: px + 30, y: py + 140, w: pw - 60, h: 56, fn: () => loadLevel(hasNext ? G.level + 1 : 0) },
+    { x: px + 10, y: py + 214, w: pw * 0.5 - 10, h: 46, fn: () => loadLevel(G.level) },
+    { x: px + pw * 0.5, y: py + 214, w: pw * 0.5 - 10, h: 46, fn: openSelect },
+  ];
+}
+
+function drawSelect() {
+  ctx.fillStyle = 'rgba(40,32,20,0.45)'; ctx.fillRect(-offX / scale - 2, -offY / scale - 2, W / scale + 4, H / scale + 4);
+  const pw = 340, ph = 470, px = (LW - pw) / 2, py = LH / 2 - ph / 2;
+  panel(px, py, pw, ph);
+  txt('Levels', LW / 2, py + 40, 28, '#3a3224', 'center', 800);
+  const cell = 52, gap = 8, gridW = 5 * cell + 4 * gap, gx = (LW - gridW) / 2, gy = py + 76;
+  const page = G.page || 0, btns = [];
+  for (let k = 0; k < 25; k++) {
+    const i = page * 25 + k;
+    if (i >= LEVELS.length) break;
+    const x = gx + (k % 5) * (cell + gap), y = gy + Math.floor(k / 5) * (cell + gap), open = isUnlocked(i);
+    glossBtn(x, y, cell, cell, 14, open ? (SAVE.done[i] ? '#2fcf6b' : '#f0a62b') : '#c9c0ae');
+    txt(open ? String(i + 1) : '🔒', x + cell / 2, y + cell / 2 - 2, open ? 22 : 18, open ? '#2f2410' : '#8a7d66', 'center', 800);
+    if (open) btns.push({ x, y, w: cell, h: cell, fn: () => loadLevel(i) });
+  }
+  glossBtn(px + 30, py + ph - 70, pw - 60, 46, 16, '#8a99b3');
+  txt('Close', LW / 2, py + ph - 48, 18, '#1f2a3d', 'center', 800);
+  G.buttons = [
+    { x: 0, y: 0, w: LW, h: LH, fn: () => { G.status = G.prevStatus || 'play'; } },
+    { x: px, y: py, w: pw, h: ph, fn: () => {} },
+    ...btns,
+    { x: px + 30, y: py + ph - 70, w: pw - 60, h: 46, fn: () => { G.status = G.prevStatus || 'play'; } },
+  ];
+}
+
+// ---------- Frame ----------
+function update(dt) {
+  G.t += dt;
+  const k = 1 - Math.exp(-dt * 16);
+  G.s.cubes.forEach((q, i) => {
+    const v = G.vis[i];
+    if (!v.anim && v.q.length) v.anim = { dc: v.q[0].dc, dr: v.q[0].dr, f: 0, x0: Math.round(v.x), y0: Math.round(v.y), M0: v.M.slice() };
+    if (v.anim) {
+      const a = v.anim, speed = 1 / Math.max(0.075, 0.17 / (1 + 0.6 * (v.q.length - 1)));   // more waiting rolls, faster rolling
+      a.f = Math.min(1, a.f + dt * speed);
+      const e = a.f < 0.5 ? 2 * a.f * a.f : 1 - Math.pow(-2 * a.f + 2, 2) / 2;                // eased 0..1
+      const th = e * Math.PI / 2, S = 0.74;                                                  // cube size in tiles
+      // tip over the leading bottom edge: centre travels along an arc, then the rest of the tile is covered by sliding
+      const along = (1 - S) * e + S / 2 - S / 2 * Math.cos(th) + S / 2 * Math.sin(th);
+      v.lift = S / 2 * (Math.sin(th) + Math.cos(th)) - S / 2;
+      v.x = a.x0 + a.dc * along; v.y = a.y0 + a.dr * along;
+      v.M = mulMM(rotM(-a.dr, a.dc, 0, th), a.M0);                                           // axis = up x direction
+      if (a.f >= 1) { v.q.shift(); v.anim = null; v.lift = 0; v.x = a.x0 + a.dc; v.y = a.y0 + a.dr; }
+    } else { v.x += (q.c - v.x) * k; v.y += (q.r - v.y) * k; v.lift = 0; }
+    const gone = q.done && !v.anim && !v.q.length;
+    v.sc += ((gone ? 0 : 1) - v.sc) * (1 - Math.exp(-dt * 10));
+    v.pop = Math.max(0, v.pop - dt * 3.5);
+  });
+  for (let i = 0; i < G.pa.length; i++) if (G.pa[i] < 1) G.pa[i] = Math.min(1, G.pa[i] + dt * 7);
+  for (const gh of G.ghosts) gh.t += dt;
+  G.ghosts = G.ghosts.filter(g => g.t < 0.3);
+  for (const p of G.parts) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 260 * dt; }
+  G.parts = G.parts.filter(p => p.t < p.life);
+  for (const f of G.floats) f.t += dt;
+  G.floats = G.floats.filter(f => f.t < 1);
+  G.holePulse = G.holePulse.map(v => Math.max(0, v - dt * 3));
+  if (G.status === 'won') G.wonT += dt;
+}
+
+function draw() {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawBackground();
+  ctx.save();
+  ctx.translate(offX, offY); ctx.scale(scale, scale);
+  G.buttons = [];
+  drawHud();
+  drawBoard();
+  drawCubes();
+  drawEffects();
+  drawCoach();
+  drawHint();
+  drawLegend();
+  if (G.status === 'won' && G.wonT > 0.7) drawWon();
+  if (G.status === 'select') drawSelect();
+  ctx.restore();
+}
+
+function pointerPos(e) {
+  const rect = cv.getBoundingClientRect();
+  return { x: (e.clientX - rect.left - offX) / scale, y: (e.clientY - rect.top - offY) / scale };
+}
+cv.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const p = pointerPos(e);
+  for (let k = G.buttons.length - 1; k >= 0; k--) {
+    const b = G.buttons[k];
+    if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) { b.fn(); return; }
+  }
+  try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+  onDown(p.x, p.y);
+}, { passive: false });
+cv.addEventListener('pointermove', e => { if (!drag) return; e.preventDefault(); const p = pointerPos(e); onMove(p.x, p.y); }, { passive: false });
+cv.addEventListener('pointerup', e => { onUp(); });
+cv.addEventListener('pointercancel', e => { onUp(); });
+cv.addEventListener('contextmenu', e => e.preventDefault());
+
+// ---------- Boot ----------
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 120));
+if (window.ResizeObserver) new ResizeObserver(() => resize()).observe(cv);
+resize();
+const startLevel = DEV ? Math.max(0, Math.min(LEVELS.length - 1, (parseInt(new URLSearchParams(location.search).get('level'), 10) || 1) - 1)) : 0;
+loadLevel(startLevel);
+let last = 0;
+function frame(ts) {
+  const dt = Math.min(0.05, (ts - (last || ts)) / 1000);
+  last = ts;
+  update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+if (DEV) window.cube = { get G() { return G; }, LEVELS, loadLevel, stepCube, undo, makeState, cloneState, move, canMove, isWon, solveFrom, update: dt => update(dt), draw: () => draw() };
+</script>
+</body>
+</html>
