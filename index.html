@@ -57,6 +57,15 @@ function rollFaces(f, dc, dr) {
   if (dr === 1) return [S, N, D, U, E, W];         // south face goes down, up face goes south
   return [N, S, U, D, E, W];                       // north
 }
+// A rectangle cube (shape 'rect') is two tiles long. o = 'S' standing (one tile), 'H' lying across (c..c+1), 'V' lying along (r..r+1).
+// (c, r) is its top-left tile. Rolling changes pose and footprint, like the block in Bloxorz.
+function cellsOf(q) { if (q.o === 'H') return [[q.c, q.r], [q.c + 1, q.r]]; if (q.o === 'V') return [[q.c, q.r], [q.c, q.r + 1]]; return [[q.c, q.r]]; }
+function rectRoll(q, dc, dr) {
+  const c = q.c, r = q.r;
+  if (q.o === 'S') return dc === 1 ? { c: c + 1, r, o: 'H' } : dc === -1 ? { c: c - 2, r, o: 'H' } : dr === 1 ? { c, r: r + 1, o: 'V' } : { c, r: r - 2, o: 'V' };
+  if (q.o === 'H') return dc === 1 ? { c: c + 2, r, o: 'S' } : dc === -1 ? { c: c - 1, r, o: 'S' } : { c, r: r + dr, o: 'H' };
+  return dr === 1 ? { c, r: r + 2, o: 'S' } : dr === -1 ? { c, r: r - 1, o: 'S' } : { c: c + dc, r, o: 'V' };
+}
 function makeState(L) {
   const cols = L.cols, rows = L.rows, n = cols * rows;
   const walls = new Uint8Array(n);
@@ -69,8 +78,8 @@ function makeState(L) {
   const s = { cols, rows, walls, cracked, gate, well, broken: new Uint8Array(n), paint: new Uint8Array(n), owner: new Int8Array(n), cubes: [], holes: [] };
   L.cubes.forEach((q, i) => {
     const idx = q.r * cols + q.c;
-    const f = q.col === RAINBOW ? RB_FACES.slice() : null;
-    s.cubes.push({ c: q.c, r: q.r, col: q.col, len: q.len, trail: [idx], done: 0, f });
+    const f = q.col === RAINBOW ? RB_FACES.slice() : null, rect = q.shape === 'rect';
+    s.cubes.push({ c: q.c, r: q.r, col: q.col, len: q.len, trail: rect ? [[idx]] : [idx], done: 0, f, shape: rect ? 'rect' : undefined, o: rect ? 'S' : undefined });
     s.paint[idx] = f ? f[0] : q.col; s.owner[idx] = i + 1;
   });
   L.holes.forEach(h => s.holes.push({ c: h.c, r: h.r, col: h.col, filled: 0 }));
@@ -79,17 +88,30 @@ function makeState(L) {
 function cloneState(s) {
   return {
     cols: s.cols, rows: s.rows, walls: s.walls, cracked: s.cracked, gate: s.gate, well: s.well, broken: s.broken.slice(), paint: s.paint.slice(), owner: s.owner.slice(),
-    cubes: s.cubes.map(q => ({ c: q.c, r: q.r, col: q.col, len: q.len, trail: q.trail.slice(), done: q.done, f: q.f ? q.f.slice() : null })),
+    cubes: s.cubes.map(q => ({ c: q.c, r: q.r, col: q.col, len: q.len, trail: q.shape ? q.trail.map(t => t.slice()) : q.trail.slice(), done: q.done, f: q.f ? q.f.slice() : null, shape: q.shape, o: q.o })),
     holes: s.holes.map(h => ({ c: h.c, r: h.r, col: h.col, filled: h.filled })),
   };
 }
 function holeAt(s, c, r) { for (const h of s.holes) if (h.c === c && h.r === r) return h; return null; }
-function cubeAt(s, c, r) { for (let j = 0; j < s.cubes.length; j++) { const o = s.cubes[j]; if (!o.done && o.c === c && o.r === r) return j; } return -1; }
+function cubeAt(s, c, r) { for (let j = 0; j < s.cubes.length; j++) { const o = s.cubes[j]; if (o.done) continue; if (o.shape) { if (cellsOf(o).some(p => p[0] === c && p[1] === r)) return j; } else if (o.c === c && o.r === r) return j; } return -1; }
 
 // Can cube i step by (dc, dr)? Walls, other cubes, and holes of another color (or already used) block it.
+function canMoveRect(s, i, dc, dr) {
+  const q = s.cubes[i], n = rectRoll(q, dc, dr);
+  for (const [c, r] of cellsOf(n)) {
+    if (c < 0 || r < 0 || c >= s.cols || r >= s.rows) return false;
+    const k = r * s.cols + c;
+    if (s.walls[k] || s.broken[k]) return false;
+    if (s.gate[k] && q.col !== s.gate[k]) return false;
+    const o = cubeAt(s, c, r); if (o >= 0 && o !== i) return false;
+    const h = holeAt(s, c, r); if (h && (h.filled || h.col !== q.col)) return false;     // lying across a matching hole is fine, it does nothing
+  }
+  return true;
+}
 function canMove(s, i, dc, dr) {
   const q = s.cubes[i];
   if (q.done) return false;
+  if (q.shape) return canMoveRect(s, i, dc, dr);
   const nc = q.c + dc, nr = q.r + dr;
   if (nc < 0 || nr < 0 || nc >= s.cols || nr >= s.rows) return false;
   const ni = nr * s.cols + nc;
@@ -102,9 +124,38 @@ function canMove(s, i, dc, dr) {
 }
 
 // Step cube i. Returns null if illegal, otherwise what happened. Mutates s.
+function moveRect(s, i, dc, dr) {
+  const q = s.cubes[i], n = rectRoll(q, dc, dr), before = q.col;
+  const oldCells = cellsOf(q).map(([c, r]) => r * s.cols + c), newCells = cellsOf(n).map(([c, r]) => r * s.cols + c);
+  let broke = -1;
+  for (const k of oldCells) if (!newCells.includes(k) && s.cracked[k] && !s.broken[k]) { s.broken[k] = 1; s.paint[k] = 0; s.owner[k] = 0; if (broke < 0) broke = k; }
+  const h = n.o === 'S' ? holeAt(s, n.c, n.r) : null;
+  if (h) {                                       // standing on its hole: it drops in
+    h.filled = 1; q.done = 1; q.c = n.c; q.r = n.r; q.o = 'S'; q.trail = [];
+    const cleared = [];
+    for (let t = 0; t < s.paint.length; t++) if (s.owner[t] === i + 1) { cleared.push(t); s.paint[t] = 0; s.owner[t] = 0; }
+    return { entered: true, hole: h, cleared, broke };
+  }
+  let painted = newCells[0], over = 0, welled = false;
+  for (const k of newCells) {
+    if (oldCells.includes(k)) continue;
+    if (s.well[k]) { q.col |= s.well[k]; painted = k; welled = true; }
+    else if (s.paint[k]) { q.col |= s.paint[k]; painted = k; over = s.paint[k]; }
+  }
+  q.c = n.c; q.r = n.r; q.o = n.o;
+  for (const k of newCells) if (!s.well[k]) { s.paint[k] = q.col; s.owner[k] = i + 1; }
+  q.trail.push(newCells);
+  const cleared = [];
+  if (q.trail.length > q.len) {
+    const drop = q.trail.shift();
+    for (const k of drop) if (!q.trail.some(f => f.includes(k)) && s.owner[k] === i + 1) { s.paint[k] = 0; s.owner[k] = 0; cleared.push(k); }
+  }
+  return { entered: false, mixed: q.col !== before, from: before, to: q.col, painted, overwrote: over, cleared, face: 0, well: welled, broke };
+}
 function move(s, i, dc, dr) {
   if (!canMove(s, i, dc, dr)) return null;
   const q = s.cubes[i];
+  if (q.shape) return moveRect(s, i, dc, dr);
   const nc = q.c + dc, nr = q.r + dr, idx = nr * s.cols + nc, old = q.r * s.cols + q.c;
   const h = holeAt(s, nc, nr);
   const crack = () => { if (s.cracked[old] && !s.broken[old]) { s.broken[old] = 1; s.paint[old] = 0; s.owner[old] = 0; return old; } return -1; };
@@ -133,7 +184,7 @@ function move(s, i, dc, dr) {
 function isWon(s) { return s.cubes.every(q => q.done); }
 function stateKey(s) {
   let k = '';
-  for (const q of s.cubes) k += q.done ? 'D;' : q.c + ',' + q.r + ',' + q.col + (q.f ? 'f' + q.f[0] + q.f[2] + q.f[4] : '') + ',' + q.trail.join('.') + ';';
+  for (const q of s.cubes) k += q.done ? 'D;' : q.c + ',' + q.r + (q.o || '') + ',' + q.col + (q.f ? 'f' + q.f[0] + q.f[2] + q.f[4] : '') + ',' + q.trail.join('.') + ';';
   for (let i = 0; i < s.paint.length; i++) if (s.paint[i]) k += i + ':' + s.paint[i] + s.owner[i] + ';';
   for (let i = 0; i < s.broken.length; i++) if (s.broken[i]) k += 'b' + i + ';';
   for (const h of s.holes) k += h.filled ? '1' : '0';
@@ -168,7 +219,7 @@ function MinHeap() {
 // Returns { status: 'solved', steps, path } | { status: 'stuck' } (searched everything, no way out) | { status: 'unknown' } (gave up at cap).
 function solveFrom(s0, cap) {
   const dist = distToAnyHole(s0);
-  const hq = s => { let t = 0; for (const q of s.cubes) if (!q.done) { const d = dist[q.r * s.cols + q.c]; if (d < 0) return 1e9; t += d; } return t; };
+  const hq = s => { let t = 0; for (const q of s.cubes) if (!q.done) { const d = dist[q.r * s.cols + q.c]; if (d < 0) return 1e9; t += q.shape ? Math.ceil(d / 2) : d; } return t; };
   const key0 = stateKey(s0);
   const keys = [key0], states = [s0], g = [0], parent = [-1], mv = [null], best = new Map([[key0, 0]]);
   const heap = MinHeap(); heap.push(hq(s0), 0);
@@ -209,17 +260,15 @@ const LEVELS = [
     cubes: [{ c: 1, r: 2, col: 1, len: 3 }, { c: 3, r: 2, col: 2, len: 3 }, { c: 2, r: 1, col: 4, len: 1 }], holes: [{ c: 4, r: 2, col: 1 }, { c: 0, r: 2, col: 2 }, { c: 2, r: 4, col: 4 }] },
   { name: "Chain", cols: 5, rows: 5, map: [".....",".###.",".....",".###.","....."],
     cubes: [{ c: 1, r: 2, col: 1, len: 2 }, { c: 2, r: 2, col: 2, len: 2 }, { c: 3, r: 2, col: 4, len: 2 }], holes: [{ c: 0, r: 0, col: 1 }, { c: 4, r: 2, col: 4 }, { c: 0, r: 4, col: 6 }] },
-  { name: "Painter", cols: 5, rows: 5, map: [".#...",".#.#.","...#.",".##..","....."],
-    cubes: [{ c: 2, r: 1, col: 8, len: 3 }, { c: 0, r: 0, col: 1, len: 2 }], holes: [{ c: 4, r: 3, col: 8 }, { c: 2, r: 0, col: 3 }] },
+  { name: "Painter", cols: 6, rows: 5, map: ["....#.",".##...","...#.#",".#....","...##."],
+    cubes: [{ c: 1, r: 2, col: 8, len: 4 }, { c: 5, r: 0, col: 1, len: 2 }], holes: [{ c: 3, r: 0, col: 8 }, { c: 0, r: 1, col: 3 }] },
   { name: "Dye works", cols: 5, rows: 5, map: [".....",".###.",".....",".###.","....."],
-    cubes: [{ c: 2, r: 4, col: 1, len: 2 }, { c: 3, r: 0, col: 4, len: 3 }], holes: [{ c: 2, r: 2, col: 3 }, { c: 1, r: 0, col: 4 }],
-    wells: [{ c: 4, r: 0, col: 2 }] },
-  { name: "Gatekeeper", cols: 6, rows: 5, map: ["...#..",".#.#..","......",".#.#..","...#.."],
-    cubes: [{ c: 1, r: 4, col: 1, len: 2 }, { c: 2, r: 4, col: 2, len: 3 }], holes: [{ c: 0, r: 3, col: 2 }, { c: 5, r: 1, col: 3 }],
-    gates: [{ c: 3, r: 2, col: 1 }],
-    wells: [{ c: 5, r: 0, col: 2 }] },
-  { name: "Fragile bridge", cols: 5, rows: 5, map: [".#.#.","..x..",".#.#.","..x..",".#.#."],
-    cubes: [{ c: 1, r: 3, col: 1, len: 3 }, { c: 4, r: 4, col: 4, len: 3 }], holes: [{ c: 3, r: 1, col: 1 }, { c: 0, r: 0, col: 4 }] },
+    cubes: [{ c: 1, r: 2, col: 1, len: 3 }, { c: 0, r: 2, col: 4, len: 3 }], holes: [{ c: 0, r: 0, col: 3 }, { c: 0, r: 3, col: 4 }],
+    wells: [{ c: 3, r: 4, col: 2 }] },
+  { name: "Long haul", cols: 7, rows: 5, map: [".......",".x.#.x.",".......",".x.#.x.","......."],
+    cubes: [{ c: 1, r: 4, col: 1, len: 3, shape: 'rect' }], holes: [{ c: 1, r: 0, col: 1 }] },
+  { name: "Squeeze", cols: 7, rows: 5, map: ["....#..",".##.#.#",".......","#.##...","......."],
+    cubes: [{ c: 4, r: 2, col: 1, len: 2, shape: 'rect' }, { c: 2, r: 4, col: 4, len: 2 }], holes: [{ c: 0, r: 4, col: 1 }, { c: 5, r: 0, col: 4 }] },
   { name: "Paint shop", cols: 5, rows: 6, map: [".x...",".#.#.",".x.x.",".#.#.","##.##","#...#"],
     cubes: [{ c: 0, r: 1, col: 1, len: 3 }, { c: 4, r: 3, col: 2, len: 2 }], holes: [{ c: 2, r: 1, col: 2 }, { c: 3, r: 5, col: 7 }],
     gates: [{ c: 2, r: 4, col: 3 }],
@@ -228,6 +277,11 @@ const LEVELS = [
     cubes: [{ c: 2, r: 0, col: 8, len: 4 }, { c: 0, r: 3, col: 1, len: 2 }], holes: [{ c: 2, r: 1, col: 8 }, { c: 3, r: 5, col: 7 }],
     gates: [{ c: 2, r: 4, col: 3 }],
     wells: [{ c: 2, r: 5, col: 4 }] },
+  { name: "Wide load", cols: 7, rows: 5, map: [".......",".#####.",".......",".#.#.#.","......."],
+    cubes: [{ c: 1, r: 4, col: 1, len: 3, shape: 'rect' }, { c: 6, r: 3, col: 2, len: 2 }], holes: [{ c: 4, r: 4, col: 3 }, { c: 3, r: 0, col: 2 }] },
+  { name: "Big finale", cols: 5, rows: 5, map: ["...#.",".#.#.",".....",".#.#.","...#."],
+    cubes: [{ c: 1, r: 2, col: 1, len: 3, shape: 'rect' }, { c: 2, r: 4, col: 2, len: 2 }], holes: [{ c: 2, r: 3, col: 2 }, { c: 4, r: 2, col: 3 }],
+    gates: [{ c: 3, r: 2, col: 1 }] },
 ];
 // ==LEVELS END==
 
@@ -269,7 +323,14 @@ const isUnlocked = i => (DEV && new URLSearchParams(location.search).has('level'
 // ---------- Game ----------
 // A cube's look: where it sits, how it is turned (M, a 3x3 rotation), and the rolls still waiting to play.
 const IDENT = [1, 0, 0, 0, 1, 0, 0, 0, 1];
-const newVis = (q, sc) => ({ x: q.c, y: q.r, M: IDENT.slice(), sc, pop: 0, q: [], anim: null, lift: 0 });
+const RECT_U = 0.74;                                   // the cube's width, as a share of a tile
+const rectCenter = (o, c, r) => o === 'S' ? [c + 0.5, r + 0.5] : o === 'H' ? [c + 1, r + 0.5] : [c + 0.5, r + 1];
+const rectDims = o => o === 'S' ? [RECT_U, RECT_U, 2 * RECT_U] : o === 'H' ? [2 * RECT_U, RECT_U, RECT_U] : [RECT_U, 2 * RECT_U, RECT_U];
+function newVis(q, sc) {
+  if (!q.shape) return { x: q.c, y: q.r, M: IDENT.slice(), sc, pop: 0, q: [], anim: null, lift: 0 };
+  const ce = rectCenter(q.o, q.c, q.r);
+  return { x: ce[0] - 0.5, y: ce[1] - 0.5, M: q.o === 'H' ? rotM(0, 1, 0, Math.PI / 2) : q.o === 'V' ? rotM(-1, 0, 0, Math.PI / 2) : IDENT.slice(), sc, pop: 0, q: [], anim: null, lift: 0 };
+}
 function loadLevel(i) {
   const L = LEVELS[i];
   const s = makeState(L);
@@ -306,10 +367,11 @@ function floatText(x, y, text, color) { G.floats.push({ x, y, text, color, t: 0 
 function stepCube(i, dc, dr) {
   const s = G.s;
   const prevPaint = s.paint.slice();
+  const q0 = s.cubes[i], pre = q0.shape ? { c: q0.c, r: q0.r, o: q0.o } : null;
   const res = move(s, i, dc, dr);
   if (!res) return false;
   const q = s.cubes[i], v = G.vis[i];
-  v.q.push({ dc, dr });
+  v.q.push({ dc, dr, pre, post: q.shape ? { c: q.c, r: q.r, o: q.o } : null });
   for (let t = 0; t < s.paint.length; t++) {
     if (prevPaint[t] > 0 && s.paint[t] === 0) G.ghosts.push({ idx: t, col: prevPaint[t], t: 0 });
     else if (s.paint[t] > 0 && s.paint[t] !== prevPaint[t]) G.pa[t] = 0;
@@ -360,6 +422,13 @@ function followTile(x, y) {
   if (!t || !drag) return;
   const q = G.s.cubes[drag.i];
   if (q.done) return;
+  if (q.shape) {                                          // a rectangle cube rolls toward a tile that touches any tile it covers
+    const cells = cellsOf(q);
+    if (cells.some(p => p[0] === t.c && p[1] === t.r)) return;
+    const adj = cells.find(p => Math.abs(t.c - p[0]) + Math.abs(t.r - p[1]) === 1);
+    if (adj && stepCube(drag.i, t.c - adj[0], t.r - adj[1])) drag.moved = true;
+    return;
+  }
   const dc = t.c - q.c, dr = t.r - q.r;
   if (dc === 0 && dr === 0) return;
   if (Math.abs(dc) + Math.abs(dr) === 1) { if (stepCube(drag.i, dc, dr)) drag.moved = true; return; }
@@ -550,14 +619,16 @@ const mulMM = (A, B) => { const o = []; for (let r = 0; r < 3; r++) for (let c =
 const LIGHT = [-0.35, -0.45, 0.82];
 
 // gx, gy: where the cube's footprint centre is on screen; lift: height of the cube's underside above the floor (px)
-function drawCube(gx, gy, S, col, M, lift, alpha, len, showDots) {
-  const half = S / 2, RB_COLS = [4, 4, 2, 2, 1, 1];   // a rainbow cube: blue sides, yellow ends, red top and bottom
+function drawCube(gx, gy, S, col, M, lift, alpha, len, showDots, dims) {
+  const half = S / 2, RB_COLS = [4, 4, 2, 2, 1, 1], dm = dims || [1, 1, 1];
+  const hzw = (Math.abs(M[6]) * dm[0] + Math.abs(M[7]) * dm[1] + Math.abs(M[8]) * dm[2]) * half;       // half the box's height in the world
+  const hxw = (Math.abs(M[0]) * dm[0] + Math.abs(M[1]) * dm[1] + Math.abs(M[2]) * dm[2]) * half, hyw = (Math.abs(M[3]) * dm[0] + Math.abs(M[4]) * dm[1] + Math.abs(M[5]) * dm[2]) * half;   // a rainbow cube: blue sides, yellow ends, red top and bottom
   ctx.save(); ctx.globalAlpha = alpha;
   // shadow on the floor (shrinks and fades as the cube tips up)
   const sh = Math.max(0.55, 1 - lift / S * 0.9);
-  ctx.beginPath(); ctx.ellipse(gx, gy + S * 0.04, S * 0.52 * sh, S * 0.34 * sh, 0, 0, Math.PI * 2);
+  ctx.beginPath(); ctx.ellipse(gx, gy + S * 0.04, hxw * 1.04 * sh, hyw * 0.68 * sh, 0, 0, Math.PI * 2);
   ctx.fillStyle = `rgba(30,20,10,${0.26 * sh})`; ctx.fill();
-  const cy = gy - (half + lift) * EL.c;
+  const cy = gy - (hzw + lift) * EL.c;
   const faces = [];
   for (const f of FACES) {
     const n = mulM(M, f.n), vis = n[1] * EL.c + n[2] * EL.s;
@@ -568,7 +639,7 @@ function drawCube(gx, gy, S, col, M, lift, alpha, len, showDots) {
   ctx.lineJoin = 'round';
   let best = null;
   for (const { f, n, vis } of faces) {
-    const poly = f.pts.map(p => { const w = mulM(M, p); return [gx + w[0] * half, cy + w[1] * half * EL.s - w[2] * half * EL.c]; });
+    const poly = f.pts.map(p => { const w = mulM(M, [p[0] * dm[0], p[1] * dm[1], p[2] * dm[2]]); return [gx + w[0] * half, cy + w[1] * half * EL.s - w[2] * half * EL.c]; });
     const P = PAL[col === 8 ? RB_COLS[f.idx] : col];
     const lam = n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2];
     const t = Math.max(0, Math.min(1, (lam + 0.25) / 1.15));
@@ -600,7 +671,7 @@ function drawCubes() {
     if (v.sc <= 0.02) continue;
     const S = ts * 0.74 * v.sc * (1 + v.pop * 0.22);
     const settled = !v.anim && !v.q.length && v.sc > 0.99;
-    drawCube(G.bx + (v.x + 0.5) * ts, G.by + (v.y + 0.5) * ts + ts * 0.18, S, q.col, v.M, v.lift * ts, v.sc > 0.99 ? 1 : v.sc, q.len, settled);
+    drawCube(G.bx + (v.x + 0.5) * ts, G.by + (v.y + 0.5) * ts + ts * 0.18, S, q.col, v.M, v.lift * ts, v.sc > 0.99 ? 1 : v.sc, q.len, settled, q.shape ? [1, 1, 2] : null);
   }
 }
 
@@ -722,11 +793,37 @@ function drawSelect() {
 }
 
 // ---------- Frame ----------
+// A rectangle cube tips over the leading bottom edge of its current pose; the centre follows that arc, a small slide fixes the tile alignment.
+function animRect(v, q, dt, k) {
+  if (!v.anim && v.q.length) { const m = v.q[0]; v.anim = { dc: m.dc, dr: m.dr, f: 0, pre: m.pre, post: m.post, M0: v.M.slice() }; }
+  if (v.anim) {
+    const a = v.anim, speed = 1 / Math.max(0.085, 0.2 / (1 + 0.6 * (v.q.length - 1)));
+    a.f = Math.min(1, a.f + dt * speed);
+    const e = a.f < 0.5 ? 2 * a.f * a.f : 1 - Math.pow(-2 * a.f + 2, 2) / 2, th = e * Math.PI / 2, cs = Math.cos(th), sn = Math.sin(th);
+    const [wx, wy, wz] = rectDims(a.pre.o), ex = a.dc ? wx : wy;
+    const c0 = rectCenter(a.pre.o, a.pre.c, a.pre.r), c1 = rectCenter(a.post.o, a.post.c, a.post.r);
+    const piv = [c0[0] + a.dc * ex / 2, c0[1] + a.dr * ex / 2], relA = -ex / 2, relZ = wz / 2;
+    const along = relA * cs + relZ * sn, z = -relA * sn + relZ * cs;
+    const end = [piv[0] + a.dc * relZ, piv[1] + a.dr * relZ];
+    v.x = piv[0] + a.dc * along + (c1[0] - end[0]) * e - 0.5;
+    v.y = piv[1] + a.dr * along + (c1[1] - end[1]) * e - 0.5;
+    v.lift = Math.max(0, z - (wz * cs + ex * sn) / 2);
+    v.M = mulMM(rotM(-a.dr, a.dc, 0, th), a.M0);
+    if (a.f >= 1) { v.q.shift(); v.anim = null; v.lift = 0; v.x = c1[0] - 0.5; v.y = c1[1] - 0.5; }
+  } else {
+    const ce = rectCenter(q.o, q.c, q.r);
+    v.x += (ce[0] - 0.5 - v.x) * k; v.y += (ce[1] - 0.5 - v.y) * k; v.lift = 0;
+  }
+  const gone = q.done && !v.anim && !v.q.length;
+  v.sc += ((gone ? 0 : 1) - v.sc) * (1 - Math.exp(-dt * 10));
+  v.pop = Math.max(0, v.pop - dt * 3.5);
+}
 function update(dt) {
   G.t += dt;
   const k = 1 - Math.exp(-dt * 16);
   G.s.cubes.forEach((q, i) => {
     const v = G.vis[i];
+    if (q.shape) { animRect(v, q, dt, k); return; }
     if (!v.anim && v.q.length) v.anim = { dc: v.q[0].dc, dr: v.q[0].dr, f: 0, x0: Math.round(v.x), y0: Math.round(v.y), M0: v.M.slice() };
     if (v.anim) {
       const a = v.anim, speed = 1 / Math.max(0.075, 0.17 / (1 + 0.6 * (v.q.length - 1)));   // more waiting rolls, faster rolling
