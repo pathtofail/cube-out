@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-<title>Cube Out</title>
+<title>Jelly Roll</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #e9e1d2; overflow: hidden; overscroll-behavior: none; }
+  html, body { margin: 0; height: 100%; background: #d9a066; overflow: hidden; overscroll-behavior: none; }
   body {
     height: 100vh; height: 100dvh; box-sizing: border-box;
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
@@ -20,7 +20,7 @@
 'use strict';
 
 /* =====================================================================
-   CUBE OUT  -  prototype (working title)
+   JELLY ROLL  -  prototype (code name: Cube Out)
 
    Grid levels in the spirit of Gecko Out. Every cube has a color and one
    exit hole of that color. Drag a cube through the grid: it paints each tile
@@ -254,7 +254,7 @@ function solveFrom(s0, cap) {
 const LEVELS = [
   { name: "First roll", cols: 5, rows: 5, map: [".....",".....",".....",".....","....."],
     cubes: [{ c: 0, r: 2, col: 1, len: 3 }], holes: [{ c: 4, r: 2, col: 1 }],
-    hint: "Drag the cube into the hole of its color." },
+    hint: "Drag the jelly into the cup of its color." },
   { name: "Sidestep", cols: 5, rows: 5, map: [".....","..#..","..#..","..#..","....."],
     cubes: [{ c: 0, r: 2, col: 4, len: 3 }], holes: [{ c: 4, r: 2, col: 4 }] },
   { name: "Wet paint", cols: 5, rows: 5, map: [".....",".....",".....",".....","....."],
@@ -268,18 +268,18 @@ const LEVELS = [
     cubes: [{ c: 1, r: 2, col: 1, len: 3 }, { c: 3, r: 2, col: 2, len: 3 }, { c: 2, r: 1, col: 4, len: 1 }], holes: [{ c: 4, r: 2, col: 1 }, { c: 0, r: 2, col: 2 }, { c: 2, r: 4, col: 4 }] },
   { name: "Long haul", cols: 7, rows: 5, map: [".......",".x.#.x.",".......",".x.#.x.","......."],
     cubes: [{ c: 1, r: 4, col: 1, len: 3, shape: 'rect' }], holes: [{ c: 1, r: 0, col: 1 }],
-    hint: "Tall cubes roll onto their side. They only drop in standing up." },
+    hint: "Tall jellies roll onto their side. They only drop in standing up." },
   { name: "Chain", cols: 5, rows: 5, map: [".....",".###.",".....",".###.","....."],
     cubes: [{ c: 1, r: 2, col: 1, len: 2 }, { c: 2, r: 2, col: 2, len: 2 }, { c: 3, r: 2, col: 4, len: 2 }], holes: [{ c: 0, r: 0, col: 1 }, { c: 4, r: 2, col: 4 }, { c: 0, r: 4, col: 6 }] },
   { name: "Dye works", cols: 5, rows: 5, map: [".....",".###.",".....",".###.","....."],
     cubes: [{ c: 1, r: 2, col: 1, len: 3 }, { c: 0, r: 2, col: 4, len: 3 }], holes: [{ c: 0, r: 0, col: 3 }, { c: 0, r: 3, col: 4 }],
     wells: [{ c: 3, r: 4, col: 2 }],
-    hint: "A well dyes any cube that rolls over it." },
+    hint: "A paint puddle dyes any jelly that rolls over it." },
   { name: "Squeeze", cols: 7, rows: 5, map: ["....#..",".##.#.#",".......","#.##...","......."],
     cubes: [{ c: 4, r: 2, col: 1, len: 2, shape: 'rect' }, { c: 2, r: 4, col: 4, len: 2 }], holes: [{ c: 0, r: 4, col: 1 }, { c: 5, r: 0, col: 4 }] },
   { name: "Painter", cols: 6, rows: 5, map: ["....#.",".##...","...#.#",".#....","...##."],
     cubes: [{ c: 1, r: 2, col: 8, len: 4 }, { c: 5, r: 0, col: 1, len: 2 }], holes: [{ c: 3, r: 0, col: 8 }, { c: 0, r: 1, col: 3 }],
-    hint: "The rainbow cube paints with the face that lands." },
+    hint: "The rainbow jelly paints with the face that lands." },
   { name: "Paint shop", cols: 5, rows: 6, map: [".x...",".#.#.",".x.x.",".#.#.","##.##","#...#"],
     cubes: [{ c: 0, r: 1, col: 1, len: 3 }, { c: 4, r: 3, col: 2, len: 2 }], holes: [{ c: 2, r: 1, col: 2 }, { c: 3, r: 5, col: 7 }],
     gates: [{ c: 2, r: 4, col: 3 }],
@@ -325,9 +325,9 @@ function mixHex(a, b, t) {
 const SAVE_KEY = 'cubeout.v1';
 function loadSave() {
   try { const o = JSON.parse(localStorage.getItem(SAVE_KEY)); if (o && typeof o.unlocked === 'number') return o; } catch (e) {}
-  return { unlocked: 1, done: {} };
+  return { unlocked: 1, done: {}, stars: {} };
 }
-const SAVE = loadSave();
+const SAVE = loadSave(); if (!SAVE.stars) SAVE.stars = {};
 function saveSave() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(SAVE)); } catch (e) {} }
 const DEV = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);   // developer shortcuts only on this machine
 const isUnlocked = i => (DEV && new URLSearchParams(location.search).has('level')) || i < SAVE.unlocked;
@@ -348,17 +348,20 @@ function loadLevel(i) {
   const s = makeState(L);
   const n = s.cols * s.rows;
   G = {
-    level: i, L, s, undo: [], moves: 0, status: 'play', t: 0,
+    level: i, L, s, undo: [], moves: 0, steps: 0, status: 'play', t: 0, par: 0, limit: 0, stars: 0,
     pa: new Float32Array(n).fill(1),                // paint fade-in per tile
     ghosts: [], parts: [], floats: [], buttons: [], conf: [], taps: [],
     vis: s.cubes.map(q => newVis(q, 1)),
     holePulse: s.holes.map(() => 0),
     coach: i === 0 && !SAVE.done[0], stuck: false,
   };
-  const maxW = LW - 28, maxH = 540;
-  G.ts = Math.floor(Math.min(maxW / s.cols, maxH / s.rows, 76));
+  // par = the shortest solution in rolls; the move limit is generous on top of it (no timer anywhere)
+  if (!L.par) { const r = solveFrom(makeState(L), 150000); L.par = r.status === 'solved' ? r.steps : 14; }
+  G.par = L.par; G.limit = Math.ceil(L.par * 1.5) + 4;
+  const maxW = LW - 32, maxH = 450;
+  G.ts = Math.floor(Math.min(maxW / s.cols, maxH / s.rows, 72));
   G.bw = G.ts * s.cols; G.bh = G.ts * s.rows;
-  G.bx = (LW - G.bw) / 2; G.by = 104 + (maxH - G.bh) / 2;
+  G.bx = (LW - G.bw) / 2; G.by = 186 + (maxH - G.bh) / 2;
 }
 
 function toTile(x, y) {
@@ -390,6 +393,7 @@ function stepCube(i, dc, dr) {
   const res = move(s, i, dc, dr);
   if (!res) return false;
   const q = s.cubes[i], v = G.vis[i];
+  G.steps++; v.dir = [dc, dr];
   v.q.push({ dc, dr, pre, post: q.shape ? { c: q.c, r: q.r, o: q.o } : null });
   for (let t = 0; t < s.paint.length; t++) {
     if (prevPaint[t] > 0 && s.paint[t] === 0) G.ghosts.push({ idx: t, col: prevPaint[t], t: 0 });
@@ -401,8 +405,8 @@ function stepCube(i, dc, dr) {
     const hi = s.holes.indexOf(res.hole);
     G.holePulse[hi] = 1;
     burst(cx(q.c), cy(q.r), [PAL[res.hole.col].c, PAL[res.hole.col].l, '#ffffff'], 18, 150);
-    floatText(cx(q.c), cy(q.r) - 20, 'Out!', PAL[res.hole.col].d);
-    if (isWon(s)) { G.status = 'won'; G.wonT = 0; for (let k = 0; k < 3; k++) confetti(LW * (0.2 + 0.3 * k), LH * 0.5, ['#f2475f', '#ffc82e', '#3f8cff', '#2fcf6b', '#a55cf3', '#ffffff'], 36); SAVE.done[G.level] = true; SAVE.unlocked = Math.max(SAVE.unlocked, G.level + 2); saveSave(); }
+    floatText(cx(q.c), cy(q.r) - 20, ['Plop!', 'Yum!', 'Gotcha!', 'Sploosh!'][(G.steps + i) % 4], PAL[res.hole.col].d);
+    if (isWon(s)) { G.status = 'won'; G.wonT = 0; G.stars = G.steps <= G.par + 1 ? 3 : G.steps <= Math.ceil(G.par * 1.3) + 2 ? 2 : 1; SAVE.stars[G.level] = Math.max(SAVE.stars[G.level] || 0, G.stars); for (let k = 0; k < 3; k++) confetti(LW * (0.2 + 0.3 * k), LH * 0.5, ['#f2475f', '#ffc82e', '#3f8cff', '#2fcf6b', '#a55cf3', '#ffffff'], 36); SAVE.done[G.level] = true; SAVE.unlocked = Math.max(SAVE.unlocked, G.level + 2); saveSave(); }
   } else if (res.mixed) {
     v.pop = 1;
     burst(cx(q.c), cy(q.r), [PAL[res.from].c, PAL[res.overwrote || s.well[res.painted] || res.to].c, PAL[res.to].c], 16, 130);
@@ -411,16 +415,16 @@ function stepCube(i, dc, dr) {
   return true;
 }
 
-function snapshot() { return { s: cloneState(G.s), moves: G.moves }; }
+function snapshot() { return { s: cloneState(G.s), moves: G.moves, steps: G.steps }; }
 function restore(snap) {
   G.stuck = false;
-  G.s = cloneState(snap.s); G.moves = snap.moves;
+  G.s = cloneState(snap.s); G.moves = snap.moves; G.steps = snap.steps;
   G.pa.fill(1); G.ghosts = []; G.parts = []; G.floats = [];
   G.vis = G.s.cubes.map(q => newVis(q, q.done ? 0 : 1));
   G.status = 'play';
 }
 function undo() {
-  if (G.status !== 'play' && G.status !== 'won') return;
+  if (G.status !== 'play' && G.status !== 'won' && G.status !== 'failed') return;
   if (!G.undo.length) return;
   restore(G.undo.pop());
   G.stuck = false;
@@ -497,31 +501,60 @@ function glossBtn(x, y, w, h, r, base) {
 }
 
 function drawBackground() {
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, '#f6f0e4'); g.addColorStop(1, '#e6dccb');
+  const wallH = Math.max(H * 0.3, 190 * scale + offY);
+  // counter top
+  const g = ctx.createLinearGradient(0, wallH, 0, H);
+  g.addColorStop(0, '#e2ad72'); g.addColorStop(1, '#bf7d45');
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  // soft confetti dots so the page doesn't feel flat
-  for (let k = 0; k < 26; k++) {
-    const x = hash(k + 1) * W, y = hash(k + 50) * H, col = PAL[[1, 2, 4, 3, 5, 6][k % 6]];
-    ctx.globalAlpha = 0.10; ctx.fillStyle = col.c; ctx.beginPath(); ctx.arc(x, y, 6 + hash(k + 90) * 14, 0, 7); ctx.fill();
+  ctx.strokeStyle = 'rgba(110,60,20,0.10)'; ctx.lineWidth = 2;
+  for (let k = 0; k < 14; k++) { const y = wallH + 30 + k * ((H - wallH) / 13); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  ctx.strokeStyle = 'rgba(110,60,20,0.07)'; ctx.lineWidth = 1.5;
+  for (let k = 0; k < 40; k++) { const x = hash(k + 3) * W, y = wallH + 10 + hash(k + 40) * (H - wallH), l = 40 + hash(k + 9) * 90; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + l, y + (hash(k + 5) - 0.5) * 6); ctx.stroke(); }
+  // tiled wall
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, wallH); ctx.clip();
+  const wg = ctx.createLinearGradient(0, 0, 0, wallH); wg.addColorStop(0, '#dff1f0'); wg.addColorStop(1, '#c4e3e2');
+  ctx.fillStyle = wg; ctx.fillRect(0, 0, W, wallH);
+  const tw = 52, th = 26;
+  for (let r = 0; r * th < wallH + th; r++) for (let c = -1; c * tw < W + tw; c++) {
+    const x = c * tw + (r % 2 ? tw / 2 : 0), y = r * th;
+    rr(x + 1.5, y + 1.5, tw - 3, th - 3, 5); ctx.fillStyle = (r + c) % 5 === 0 ? '#f6fbfa' : '#ecf8f7'; ctx.fill();
   }
-  ctx.globalAlpha = 1;
+  const sun = ctx.createRadialGradient(W * 0.2, 0, 10, W * 0.2, 0, W * 0.8); sun.addColorStop(0, 'rgba(255,244,200,0.55)'); sun.addColorStop(1, 'rgba(255,244,200,0)');
+  ctx.fillStyle = sun; ctx.fillRect(0, 0, W, wallH);
+  ctx.restore();
+  // counter edge + a little shadow on the wall
+  const sh = ctx.createLinearGradient(0, wallH - 26, 0, wallH); sh.addColorStop(0, 'rgba(60,90,90,0)'); sh.addColorStop(1, 'rgba(60,90,90,0.22)');
+  ctx.fillStyle = sh; ctx.fillRect(0, wallH - 26, W, 26);
+  ctx.fillStyle = '#f3c88f'; ctx.fillRect(0, wallH, W, 5); ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.fillRect(0, wallH, W, 2);
+  // props on the counter: a potted plant and a spoon jar
+  const px = W * 0.86, py = wallH + 2;
+  ctx.fillStyle = '#c9683d'; ctx.beginPath(); ctx.moveTo(px - 20, py - 34); ctx.lineTo(px + 20, py - 34); ctx.lineTo(px + 14, py); ctx.lineTo(px - 14, py); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#dd7d50'; ctx.fillRect(px - 22, py - 40, 44, 9);
+  ctx.fillStyle = '#4fae5a'; for (const [dx, dy, rx, ry, a] of [[-12, -62, 11, 22, -0.5], [0, -72, 11, 26, 0], [13, -60, 11, 21, 0.5]]) { ctx.beginPath(); ctx.ellipse(px + dx, py + dy, rx, ry, a, 0, 7); ctx.fill(); }
+  const jx = W * 0.1, jy = wallH + 2;
+  ctx.fillStyle = '#f2efe6'; rr(jx - 20, jy - 52, 40, 52, 7); ctx.fill(); ctx.strokeStyle = '#cfc7b4'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.strokeStyle = '#a77a4a'; ctx.lineWidth = 5; ctx.lineCap = 'round'; for (const dx of [-8, 0, 9]) { ctx.beginPath(); ctx.moveTo(jx + dx, jy - 50); ctx.lineTo(jx + dx * 1.6, jy - 86 + Math.abs(dx)); ctx.stroke(); }
+  ctx.lineCap = 'butt';
+  const vg = ctx.createRadialGradient(W / 2, H * 0.55, H * 0.3, W / 2, H * 0.55, H * 0.85); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(60,30,10,0.28)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
 }
 
 function drawBoard() {
   const s = G.s, ts = G.ts;
   // tray
   ctx.save();
-  ctx.shadowColor = 'rgba(60,40,10,0.30)'; ctx.shadowBlur = 22; ctx.shadowOffsetY = 8;
-  rr(G.bx - 12, G.by - 12, G.bw + 24, G.bh + 24, 22); ctx.fillStyle = '#3b4658'; ctx.fill();
+  ctx.shadowColor = 'rgba(60,30,10,0.45)'; ctx.shadowBlur = 26; ctx.shadowOffsetY = 12;
+  const tg = ctx.createLinearGradient(0, G.by - 14, 0, G.by + G.bh + 14); tg.addColorStop(0, '#f3f6f9'); tg.addColorStop(1, '#a9b4c0');
+  rr(G.bx - 14, G.by - 14, G.bw + 28, G.bh + 28, 24); ctx.fillStyle = tg; ctx.fill();
   ctx.restore();
-  rr(G.bx - 12, G.by - 12, G.bw + 24, G.bh + 24, 22); ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.stroke();
+  rr(G.bx - 14, G.by - 14, G.bw + 28, G.bh + 28, 24); ctx.lineWidth = 2.5; ctx.strokeStyle = '#8795a3'; ctx.stroke();
+  rr(G.bx - 9, G.by - 9, G.bw + 18, G.bh + 18, 18); ctx.fillStyle = 'rgba(70,85,100,0.25)'; ctx.fill();
   // floor
   for (let r = 0; r < s.rows; r++) for (let c = 0; c < s.cols; c++) {
     const x = G.bx + c * ts, y = G.by + r * ts, i = r * s.cols + c;
     if (s.walls[i]) continue;
     if (s.broken[i]) { drawPit(c, r); continue; }
-    rr(x + 1, y + 1, ts - 2, ts - 2, ts * 0.16); ctx.fillStyle = (c + r) % 2 ? '#f1ece0' : '#e8e2d4'; ctx.fill();
+    rr(x + 1, y + 1, ts - 2, ts - 2, ts * 0.16); ctx.fillStyle = (c + r) % 2 ? '#fff8ea' : '#f7ebd0'; ctx.fill();
     if (s.cracked[i]) drawCracks(c, r);
   }
   // paint (and paint that is fading away)
@@ -559,7 +592,8 @@ function drawHole(h, pulse) {
   ctx.fill();
   const g = ctx.createRadialGradient(x, y - R * 0.2, R * 0.1, x, y, R * 0.7);
   g.addColorStop(0, '#2a2f3c'); g.addColorStop(1, '#0e1118');
-  ctx.beginPath(); ctx.arc(x, y, R * 0.68, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
+  ctx.beginPath(); ctx.arc(x, y, R * 0.74, 0, Math.PI * 2); ctx.fillStyle = '#fffdf6'; ctx.fill();   // porcelain lip
+  ctx.beginPath(); ctx.arc(x, y, R * 0.64, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
   ctx.beginPath(); ctx.arc(x, y, R * 0.9, Math.PI * 1.1, Math.PI * 1.7); ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.stroke();
   if (h.filled) {                                   // the plug that closes a used hole
     ctx.beginPath(); ctx.arc(x, y, R * 0.68, 0, Math.PI * 2); ctx.fillStyle = P.l; ctx.fill();
@@ -611,10 +645,12 @@ function drawGate(c, r, col) {
 }
 function drawWall(c, r) {
   const ts = G.ts, x = G.bx + c * ts, y = G.by + r * ts;
-  rr(x + 1, y + 3, ts - 2, ts - 2, ts * 0.16); ctx.fillStyle = '#232b39'; ctx.fill();
-  const g = ctx.createLinearGradient(0, y, 0, y + ts); g.addColorStop(0, '#5a6a82'); g.addColorStop(1, '#46556b');
+  rr(x + 1, y + 4, ts - 2, ts - 2, ts * 0.16); ctx.fillStyle = '#2e170c'; ctx.fill();
+  const g = ctx.createLinearGradient(0, y, 0, y + ts); g.addColorStop(0, '#9a5d3c'); g.addColorStop(1, '#6b3b24');
   rr(x + 1, y, ts - 2, ts - 4, ts * 0.16); ctx.fillStyle = g; ctx.fill();
-  rr(x + 5, y + 3, ts - 10, ts * 0.22, ts * 0.1); ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(40,18,8,0.45)'; ctx.lineWidth = 2;                 // the squares of a chocolate bar
+  ctx.beginPath(); ctx.moveTo(x + ts / 2, y + 3); ctx.lineTo(x + ts / 2, y + ts - 7); ctx.moveTo(x + 4, y + (ts - 4) / 2); ctx.lineTo(x + ts - 4, y + (ts - 4) / 2); ctx.stroke();
+  rr(x + 5, y + 3, ts - 10, ts * 0.2, ts * 0.1); ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fill();
 }
 
 // A real 3D cube: eight corners turned by M, only the faces that look at the camera are painted.
@@ -639,7 +675,7 @@ const mulMM = (A, B) => { const o = []; for (let r = 0; r < 3; r++) for (let c =
 const LIGHT = [-0.35, -0.45, 0.82];
 
 // gx, gy: where the cube's footprint centre is on screen; lift: height of the cube's underside above the floor (px)
-function drawCube(gx, gy, S, col, M, lift, alpha, len, showDots, dims) {
+function drawCube(gx, gy, S, col, M, lift, alpha, len, showDots, dims, look, mood, front) {
   const half = S / 2, RB_COLS = [4, 4, 2, 2, 1, 1], dm = dims || [1, 1, 1];
   const hzw = (Math.abs(M[6]) * dm[0] + Math.abs(M[7]) * dm[1] + Math.abs(M[8]) * dm[2]) * half;       // half the box's height in the world
   const hxw = (Math.abs(M[0]) * dm[0] + Math.abs(M[1]) * dm[1] + Math.abs(M[2]) * dm[2]) * half, hyw = (Math.abs(M[3]) * dm[0] + Math.abs(M[4]) * dm[1] + Math.abs(M[5]) * dm[2]) * half;   // a rainbow cube: blue sides, yellow ends, red top and bottom
@@ -670,14 +706,34 @@ function drawCube(gx, gy, S, col, M, lift, alpha, len, showDots, dims) {
     const cxp = poly.reduce((a, p) => a + p[0], 0) / 4, cyp = poly.reduce((a, p) => a + p[1], 0) / 4;
     ctx.beginPath(); poly.forEach((p, k) => { const x = cxp + (p[0] - cxp) * 0.72, y = cyp + (p[1] - cyp) * 0.72; k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath();
     ctx.fillStyle = mixHex(P.d, P.l, Math.min(1, t + 0.12)); ctx.globalAlpha = alpha * 0.55; ctx.fill(); ctx.globalAlpha = alpha;
-    if (!best || vis > best.vis) best = { vis, cx: cxp, cy: cyp };
+    const score = front ? n[1] : vis;
+    if (!best || score > best.score) best = { vis, score, cx: cxp, cy: cyp, S2: Math.sqrt(poly.reduce((a, p, k) => { const q2 = poly[(k + 1) % 4]; return a + (p[0] * q2[1] - q2[0] * p[1]); }, 0) ** 2) / 2 };
   }
-  // one small dot per tile of paint this cube leaves behind, on the face that looks up most
-  if (showDots && best) {
-    const n = Math.min(len || 0, 6), dgap = S * 0.15;
-    for (let k = 0; k < n; k++) {
-      ctx.beginPath(); ctx.arc(best.cx + (k - (n - 1) / 2) * dgap, best.cy, S * 0.045, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill();
+  if (best) {
+    const fs = Math.min(S * 1.1, Math.sqrt(best.S2) * 1.28 || S), vv = Math.max(0.5, Math.min(1, best.vis));
+    const ex = fs * 0.2, ey = best.cy - fs * 0.04, er = fs * 0.115, lk = look || [0, 1];
+    // jelly shine
+    ctx.fillStyle = 'rgba(255,255,255,0.42)'; ctx.beginPath(); ctx.ellipse(best.cx - fs * 0.2, best.cy - fs * 0.3, fs * 0.17, fs * 0.08, -0.5, 0, 7); ctx.fill();
+    // cheeks
+    ctx.fillStyle = 'rgba(255,120,150,0.32)'; for (const sx of [-1, 1]) { ctx.beginPath(); ctx.ellipse(best.cx + sx * fs * 0.3, best.cy + fs * 0.1, fs * 0.07, fs * 0.045, 0, 0, 7); ctx.fill(); }
+    // eyes (they blink now and then and look the way the jelly last rolled)
+    const blink = Math.sin(G.t * 1.3 + gx * 0.07) > 0.985 || mood === 'happy';
+    for (const sx of [-1, 1]) {
+      if (blink) { ctx.strokeStyle = '#2a1f33'; ctx.lineWidth = Math.max(1.6, fs * 0.035); ctx.lineCap = 'round'; ctx.beginPath(); ctx.arc(best.cx + sx * ex, ey + er * 0.2, er * 0.7, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke(); continue; }
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(best.cx + sx * ex, ey, er, er * (0.78 + 0.22 * vv), 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#2a1f33'; ctx.beginPath(); ctx.arc(best.cx + sx * ex + lk[0] * er * 0.38, ey + lk[1] * er * 0.32, er * 0.58, 0, 7); ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(best.cx + sx * ex + lk[0] * er * 0.38 - er * 0.2, ey + lk[1] * er * 0.32 - er * 0.2, er * 0.2, 0, 7); ctx.fill();
+    }
+    // mouth: a smile at rest, a little 'o' while rolling
+    ctx.strokeStyle = '#2a1f33'; ctx.fillStyle = '#2a1f33'; ctx.lineWidth = Math.max(1.6, fs * 0.04); ctx.lineCap = 'round';
+    const my = best.cy + fs * 0.2;
+    if (mood === 'o') { ctx.beginPath(); ctx.ellipse(best.cx, my, fs * 0.05, fs * 0.065, 0, 0, 7); ctx.fill(); }
+    else if (mood === 'happy') { ctx.beginPath(); ctx.moveTo(best.cx - fs * 0.13, my - fs * 0.03); ctx.quadraticCurveTo(best.cx, my + fs * 0.2, best.cx + fs * 0.13, my - fs * 0.03); ctx.closePath(); ctx.fillStyle = '#7a2638'; ctx.fill(); ctx.stroke(); }
+    else { ctx.beginPath(); ctx.moveTo(best.cx - fs * 0.1, my); ctx.quadraticCurveTo(best.cx, my + fs * 0.1, best.cx + fs * 0.1, my); ctx.stroke(); }
+    // one little pip per tile of paint this jelly leaves behind
+    if (showDots) {
+      const n = Math.min(len || 0, 6), dgap = fs * 0.13;
+      for (let k = 0; k < n; k++) { ctx.beginPath(); ctx.arc(best.cx + (k - (n - 1) / 2) * dgap, best.cy + fs * 0.37, fs * 0.035, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill(); }
     }
   }
   ctx.restore();
@@ -691,7 +747,7 @@ function drawCubes() {
     if (v.sc <= 0.02) continue;
     const S = ts * 0.74 * v.sc * (1 + v.pop * 0.22);
     const settled = !v.anim && !v.q.length && v.sc > 0.99;
-    drawCube(G.bx + (v.x + 0.5) * ts, G.by + (v.y + 0.5) * ts + ts * 0.18, S, q.col, v.M, v.lift * ts, v.sc > 0.99 ? 1 : v.sc, q.len, settled, q.shape ? [1 + 0.07 * (v.land || 0), 1 + 0.07 * (v.land || 0), 2 * (1 - 0.07 * (v.land || 0))] : [1 + 0.1 * (v.land || 0), 1 + 0.1 * (v.land || 0), 1 - 0.12 * (v.land || 0)]);
+    drawCube(G.bx + (v.x + 0.5) * ts, G.by + (v.y + 0.5) * ts + ts * 0.18, S, q.col, v.M, v.lift * ts, v.sc > 0.99 ? 1 : v.sc, q.len, settled, q.shape ? [1 + 0.07 * (v.land || 0), 1 + 0.07 * (v.land || 0), 2 * (1 - 0.07 * (v.land || 0))] : [1 + 0.1 * (v.land || 0), 1 + 0.1 * (v.land || 0), 1 - 0.12 * (v.land || 0)], v.dir || [0, 1], v.anim ? 'o' : (G.status === 'won' ? 'happy' : 'smile'));
   }
 }
 
@@ -714,36 +770,68 @@ function drawEffects() {
   ctx.globalAlpha = 1;
 }
 
+function richText(parts, x, y, size, weight = 800) {
+  font(size, weight); const w = parts.reduce((a, p) => a + ctx.measureText(p[0]).width, 0);
+  let cx0 = x - w / 2; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  for (const [t, c] of parts) { ctx.fillStyle = c; ctx.fillText(t, cx0, y); cx0 += ctx.measureText(t).width; }
+}
+function drawStar(x, y, r, fill, glow) {
+  ctx.save(); ctx.translate(x, y);
+  if (glow) { ctx.shadowColor = 'rgba(255,200,60,0.8)'; ctx.shadowBlur = 14; }
+  ctx.beginPath(); for (let k = 0; k < 10; k++) { const rad = k % 2 ? r * 0.46 : r, a = -Math.PI / 2 + k * Math.PI / 5; ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad); } ctx.closePath();
+  ctx.fillStyle = fill ? '#ffc21f' : '#e4d9c0'; ctx.fill(); ctx.lineJoin = 'round'; ctx.lineWidth = r * 0.16; ctx.strokeStyle = fill ? '#c98a00' : '#bfae8a'; ctx.stroke(); ctx.restore();
+}
+function creamPill(x, y, w, h, r = 16) { ctx.save(); ctx.shadowColor = 'rgba(70,40,10,0.28)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 3; rr(x, y, w, h, r); ctx.fillStyle = '#fffaf0'; ctx.fill(); ctx.restore(); rr(x, y, w, h, r); ctx.lineWidth = 2; ctx.strokeStyle = '#e8d9b8'; ctx.stroke(); }
+function counter(x, label, value, color) {
+  creamPill(x, 14, 66, 56); txt(label, x + 33, 28, 9.5, '#9a8b6a', 'center', 800); txt(String(value), x + 33, 51, 27, color, 'center', 900);
+}
 function drawHud() {
-  txt('Level ' + (G.level + 1), 20, 36, 26, '#3a3224', 'left', 800);
-  txt(G.L.name || '', 20, 62, 14, '#8a7d66', 'left', 700);
-  const bs = 46, by = 20;
-  const bx = [LW - 20 - bs, LW - 20 - bs * 2 - 10, LW - 20 - bs * 3 - 20];
-  const defs = [['☰', '#8a99b3', openSelect], ['↻', '#f0a62b', () => loadLevel(G.level)], ['↶', G.undo.length ? '#f0a62b' : '#bdb4a2', undo]];
-  defs.forEach(([icon, col, fn], k) => {
-    glossBtn(bx[k], by, bs, bs, 14, col);
-    txt(icon, bx[k] + bs / 2, by + bs / 2 - 2, 24, '#2f2410', 'center', 700);
-    G.buttons.push({ x: bx[k] - 4, y: by - 4, w: bs + 8, h: bs + 8, fn });
-  });
-  txt(`Moves ${G.moves}`, LW / 2, 86, 14, '#8a7d66', 'center', 700);
+  creamPill(14, 16, 48, 48); txt('\u2630', 38, 41, 24, '#5a4a30', 'center', 800);
+  G.buttons.push({ x: 8, y: 10, w: 60, h: 60, fn: openSelect });
+  txt('LEVEL ' + (G.level + 1), 76, 30, 11, '#7a6a48', 'left', 800, 'rgba(255,255,255,0.85)');
+  txt(G.L.name || '', 76, 52, 22, '#3a2c18', 'left', 900, 'rgba(255,255,255,0.9)');
+  const left = G.s.cubes.filter(q => !q.done).length, mleft = Math.max(0, G.limit - G.steps);
+  counter(LW - 14 - 66 * 2 - 8, 'JELLIES', left, '#e0527f');
+  counter(LW - 14 - 66, 'MOVES', mleft, mleft <= 3 ? '#e8452a' : '#3a2c18');
+  // goal banner: what to do, in one line (and the one new idea of this level)
+  const stuck = G.stuck && G.status === 'play', n = G.s.cubes.length, hasHint = !!G.L.hint && !stuck;
+  const bh = hasHint ? 76 : 50;
+  ctx.save(); ctx.shadowColor = 'rgba(70,40,10,0.3)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 4;
+  rr(24, 84, LW - 48, bh, 20); ctx.fillStyle = stuck ? '#ffe3d6' : '#fffaf0'; ctx.fill(); ctx.restore();
+  rr(24, 84, LW - 48, bh, 20); ctx.lineWidth = 2; ctx.strokeStyle = stuck ? '#e8794a' : '#e8d9b8'; ctx.stroke();
+  if (stuck) richText([['No way out from here. Try Undo \u21B6', '#a3411a']], LW / 2, 109, 16);
+  else {
+    richText([['Roll ', '#3a2c18'], [n === 1 ? 'the jelly' : `all ${n} jellies`, '#e0527f'], [' into ' + (n === 1 ? 'its' : 'their') + ' cup' + (n === 1 ? '' : 's') + ' in ', '#3a2c18'], [`${G.limit} moves`, '#e8452a']], LW / 2, 109, n > 2 ? 15 : 16);
+    if (hasHint) {
+      font(12.5, 700); const tw = ctx.measureText(G.L.hint).width, tag = 36, total = tag + 7 + tw, x0 = LW / 2 - total / 2;
+      rr(x0, 130, tag, 18, 9); ctx.fillStyle = '#ffd24a'; ctx.fill(); txt('NEW', x0 + tag / 2, 139.5, 10, '#7a4a00', 'center', 900);
+      txt(G.L.hint, x0 + tag + 7, 139.5, 12.5, '#6a5c42', 'left', 700);
+    }
+  }
+  // big round controls at the bottom: undo and retry
+  const by = LH - 188;
+  glossBtn(LW / 2 - 78, by, 56, 56, 28, G.undo.length ? '#ffb21f' : '#d3c7a8'); txt('\u21B6', LW / 2 - 50, by + 26, 28, '#4a2a00', 'center', 800);
+  glossBtn(LW / 2 + 22, by, 56, 56, 28, '#7fb2ee'); txt('\u21BB', LW / 2 + 50, by + 26, 28, '#10305a', 'center', 800);
+  txt('Undo', LW / 2 - 50, by + 68, 11, '#fff7e6', 'center', 800, 'rgba(90,50,10,0.7)'); txt('Retry', LW / 2 + 50, by + 68, 11, '#fff7e6', 'center', 800, 'rgba(90,50,10,0.7)');
+  G.buttons.push({ x: LW / 2 - 86, y: by - 6, w: 72, h: 84, fn: undo }, { x: LW / 2 + 14, y: by - 6, w: 72, h: 84, fn: () => loadLevel(G.level) });
 }
 
 // How colors mix, always on screen: it is the whole puzzle.
 function drawLegend() {
   if (G.level < 2) return;                                // the first levels have nothing to mix
-  const y = LH - 112;
-  rr(20, y, LW - 40, 78, 20); ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fill();
+  const y = LH - 100;
+  rr(20, y, LW - 40, 70, 20); ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fill();
   ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(120,100,60,0.2)'; ctx.stroke();
-  txt('Stepping on another color’s paint mixes the two', LW / 2, y + 17, 13, '#6a5e48', 'center', 700);
+  txt('Stepping on another color’s paint mixes the two', LW / 2, y + 15, 12.5, '#6a5e48', 'center', 700);
   const eq = [[1, 2, 3], [1, 4, 5], [2, 4, 6]];
   const ew = (LW - 40) / 3, sq = 17, step = 22;          // [color] + [color] = [color], five items, evenly spaced
   eq.forEach(([a, b, c], k) => {
-    const x0 = 20 + k * ew + ew / 2, yy = y + 52;
+    const x0 = 20 + k * ew + ew / 2, yy = y + 47;
     const sq1 = (col, x) => { rr(x - sq / 2, yy - sq / 2, sq, sq, 5); ctx.fillStyle = PAL[col].c; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = PAL[col].d; ctx.stroke(); };
     sq1(a, x0 - step * 2); txt('+', x0 - step, yy + 0.5, 15, '#6a5e48');
     sq1(b, x0);            txt('=', x0 + step, yy + 0.5, 15, '#6a5e48');
     sq1(c, x0 + step * 2);
-    if (k < 2) { ctx.fillStyle = 'rgba(120,100,60,0.25)'; ctx.fillRect(20 + (k + 1) * ew - 0.5, y + 38, 1, 28); }
+    if (k < 2) { ctx.fillStyle = 'rgba(120,100,60,0.25)'; ctx.fillRect(20 + (k + 1) * ew - 0.5, y + 33, 1, 26); }
   });
 }
 
@@ -756,16 +844,7 @@ function drawCoach() {
   ctx.fillText('👆', x + 8, y + 34);
 }
 
-function drawHint() {
-  if (G.stuck && G.status === 'play') {
-    const y = G.by + G.bh + 40;
-    rr(LW / 2 - 150, y - 17, 300, 34, 17); ctx.fillStyle = '#ffe3d6'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#e8794a'; ctx.stroke();
-    txt('No way out from here. Try Undo \u21B6', LW / 2, y + 0.5, 15, '#a3411a', 'center', 800);
-    return;
-  }
-  if (!G.L.hint) return;
-  txt(G.L.hint, LW / 2, G.by + G.bh + 40, 15, '#6a5e48', 'center', 700);
-}
+function drawHint() {}
 
 // ---------- Panels ----------
 function panel(x, y, w, h) {
@@ -776,21 +855,76 @@ function panel(x, y, w, h) {
 function openSelect() { G.prevStatus = G.status; G.status = 'select'; G.page = 0; }
 
 function drawWon() {
-  ctx.fillStyle = 'rgba(40,32,20,0.35)'; ctx.fillRect(-offX / scale - 2, -offY / scale - 2, W / scale + 4, H / scale + 4);
-  const pw = 310, ph = 300, px = (LW - pw) / 2, py = LH / 2 - ph / 2 - 20;
+  ctx.fillStyle = 'rgba(60,35,10,0.4)'; ctx.fillRect(-offX / scale - 2, -offY / scale - 2, W / scale + 4, H / scale + 4);
+  const pw = 310, ph = 350, px = (LW - pw) / 2, py = LH / 2 - ph / 2 - 20, tt = G.wonT - 0.7;
+  const pop = Math.min(1, tt * 4), ease = 1 + 2.7 * Math.pow(pop - 1, 3) + 1.7 * Math.pow(pop - 1, 2);
+  ctx.save(); ctx.translate(LW / 2, py + ph / 2); ctx.scale(ease, ease); ctx.translate(-LW / 2, -(py + ph / 2));
   panel(px, py, pw, ph);
-  txt('Cleared!', LW / 2, py + 62, 40, '#3a3224', 'center', 800);
-  txt(`${G.moves} move${G.moves === 1 ? '' : 's'}`, LW / 2, py + 108, 18, '#8a7d66', 'center', 700);
+  txt('Yum!', LW / 2, py + 56, 46, '#2fa857', 'center', 900, '#ffffff');
+  for (let k = 0; k < 3; k++) { const s = Math.max(0, Math.min(1, (tt - 0.25 - k * 0.22) * 5)), e2 = s < 1 ? s * 1.25 : 1; ctx.save(); ctx.translate(LW / 2 + (k - 1) * 66, py + 128 - (k === 1 ? 10 : 0)); ctx.scale(e2, e2); drawStar(0, 0, k === 1 ? 34 : 28, k < G.stars, k < G.stars && s >= 1); ctx.restore(); }
+  txt(`${G.steps} moves \u00B7 par ${G.par}`, LW / 2, py + 190, 17, '#8a7a5a', 'center', 800);
   const hasNext = G.level < LEVELS.length - 1;
-  glossBtn(px + 30, py + 140, pw - 60, 56, 18, '#2fcf6b');
-  txt(hasNext ? 'Next level' : 'Play again', LW / 2, py + 166, 22, '#0f3a1c', 'center', 800);
-  txt('Replay', px + pw * 0.3, py + 238, 16, '#8a7d66', 'center', 700);
-  txt('All levels', px + pw * 0.7, py + 238, 16, '#6a5e48', 'center', 700);
+  glossBtn(px + 30, py + 214, pw - 60, 58, 20, '#34c768');
+  txt(hasNext ? 'Next level' : 'Play again', LW / 2, py + 241, 23, '#0b3a1a', 'center', 900);
+  txt('Replay', px + pw * 0.3, py + 306, 16, '#8a7a5a', 'center', 800);
+  txt('All levels', px + pw * 0.7, py + 306, 16, '#6a5a3c', 'center', 800);
+  ctx.restore();
   G.buttons = [
     { x: 0, y: 0, w: LW, h: LH, fn: () => {} },
-    { x: px + 30, y: py + 140, w: pw - 60, h: 56, fn: () => loadLevel(hasNext ? G.level + 1 : 0) },
-    { x: px + 10, y: py + 214, w: pw * 0.5 - 10, h: 46, fn: () => loadLevel(G.level) },
-    { x: px + pw * 0.5, y: py + 214, w: pw * 0.5 - 10, h: 46, fn: openSelect },
+    { x: px + 30, y: py + 214, w: pw - 60, h: 58, fn: () => loadLevel(hasNext ? G.level + 1 : 0) },
+    { x: px + 10, y: py + 282, w: pw * 0.5 - 10, h: 46, fn: () => loadLevel(G.level) },
+    { x: px + pw * 0.5, y: py + 282, w: pw * 0.5 - 10, h: 46, fn: openSelect },
+  ];
+}
+function drawFailed() {
+  ctx.fillStyle = 'rgba(60,35,10,0.4)'; ctx.fillRect(-offX / scale - 2, -offY / scale - 2, W / scale + 4, H / scale + 4);
+  const pw = 310, ph = 300, px = (LW - pw) / 2, py = LH / 2 - ph / 2 - 20;
+  const pop = Math.min(1, (G.failT - 0.35) * 4), ease = 1 + 2.7 * Math.pow(pop - 1, 3) + 1.7 * Math.pow(pop - 1, 2);
+  if (G.failT < 0.35) return;
+  ctx.save(); ctx.translate(LW / 2, py + ph / 2); ctx.scale(ease, ease); ctx.translate(-LW / 2, -(py + ph / 2));
+  panel(px, py, pw, ph);
+  txt('Out of moves', LW / 2, py + 60, 34, '#c4421c', 'center', 900, '#ffffff');
+  txt('So close! Undo a few rolls, or start over.', LW / 2, py + 104, 14, '#8a7a5a', 'center', 700);
+  glossBtn(px + 30, py + 130, pw - 60, 58, 20, '#ffb21f'); txt('Try again', LW / 2, py + 157, 23, '#4a2a00', 'center', 900);
+  txt('Undo', px + pw * 0.3, py + 232, 17, G.undo.length ? '#5a4a30' : '#bfb398', 'center', 800);
+  txt('All levels', px + pw * 0.7, py + 232, 17, '#6a5a3c', 'center', 800);
+  ctx.restore();
+  G.buttons = [
+    { x: 0, y: 0, w: LW, h: LH, fn: () => {} },
+    { x: px + 30, y: py + 130, w: pw - 60, h: 58, fn: () => loadLevel(G.level) },
+    { x: px + 10, y: py + 206, w: pw * 0.5 - 10, h: 46, fn: undo },
+    { x: px + pw * 0.5, y: py + 206, w: pw * 0.5 - 10, h: 46, fn: openSelect },
+  ];
+}
+function drawHome() {
+  for (let k = 0; k < 20; k++) { const x = hash(k + 1) * LW, y = ((G.t * (14 + hash(k + 7) * 22) + hash(k + 2) * (LH + 60)) % (LH + 60)) - 30; ctx.globalAlpha = 0.65; ctx.fillStyle = PAL[[1, 2, 4, 6, 5, 3][k % 6]].c; ctx.beginPath(); ctx.arc(x, y, 4 + hash(k + 9) * 5, 0, 7); ctx.fill(); }
+  ctx.globalAlpha = 1;
+  const word = (s, y, size, off) => {
+    font(size, 900); ctx.textBaseline = 'middle'; const widths = [...s].map(ch => ctx.measureText(ch).width), tot = widths.reduce((a, b) => a + b, 0);
+    let x = LW / 2 - tot / 2; const cols = [1, 2, 4, 6, 5];
+    [...s].forEach((ch, k) => {
+      const bob = Math.sin(G.t * 2.6 + k * 0.8 + off) * 5, rot = Math.sin(G.t * 2 + k) * 0.05;
+      ctx.save(); ctx.translate(x + widths[k] / 2, y + bob); ctx.rotate(rot); ctx.textAlign = 'center';
+      ctx.lineJoin = 'round'; ctx.lineWidth = 11; ctx.strokeStyle = '#3a2548'; ctx.strokeText(ch, 0, 0);
+      ctx.fillStyle = PAL[cols[(k + off) % 5]].c; ctx.fillText(ch, 0, 0);
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.save(); ctx.beginPath(); ctx.rect(-widths[k] / 2, -size * 0.5, widths[k], size * 0.38); ctx.clip(); ctx.fillText(ch, 0, 0); ctx.restore();
+      ctx.restore(); x += widths[k];
+    });
+  };
+  word('Jelly', 160, 84, 0); word('Roll', 244, 84, 2);
+  [1, 2, 4].forEach((col, k) => {
+    const bob = Math.abs(Math.sin(G.t * 3 + k * 1.3)) * 16, S = 92;
+    drawCube(LW / 2 + (k - 1) * 112, 400 + (k === 1 ? -12 : 0), S, col, IDENT, bob, 1, 3, false, null, [Math.sin(G.t + k) * 0.7, 0.4], 'smile', true);
+  });
+  const n = Math.min(LEVELS.length, Math.max(1, SAVE.unlocked));
+  glossBtn(LW / 2 - 112, 520, 224, 80, 30, '#ffb21f');
+  txt('PLAY', LW / 2, 548, 38, '#4a2a00', 'center', 900); txt('Level ' + n, LW / 2, 580, 15, '#7a4a00', 'center', 800);
+  txt('All levels', LW / 2, 642, 17, '#fff7e6', 'center', 800, 'rgba(90,50,10,0.75)');
+  const done = Object.keys(SAVE.stars).reduce((a, k) => a + SAVE.stars[k], 0);
+  if (done) txt('\u2605 ' + done + ' / ' + LEVELS.length * 3, LW / 2, 690, 16, '#fff7e6', 'center', 800, 'rgba(90,50,10,0.75)');
+  G.buttons = [
+    { x: LW / 2 - 112, y: 520, w: 224, h: 80, fn: () => loadLevel(n - 1) },
+    { x: LW / 2 - 70, y: 624, w: 140, h: 36, fn: () => { G.prevStatus = 'home'; G.status = 'select'; G.page = 0; } },
   ];
 }
 
@@ -807,6 +941,7 @@ function drawSelect() {
     const x = gx + (k % 5) * (cell + gap), y = gy + Math.floor(k / 5) * (cell + gap), open = isUnlocked(i);
     glossBtn(x, y, cell, cell, 14, open ? (SAVE.done[i] ? '#2fcf6b' : '#f0a62b') : '#c9c0ae');
     txt(open ? String(i + 1) : '🔒', x + cell / 2, y + cell / 2 - 2, open ? 22 : 18, open ? '#2f2410' : '#8a7d66', 'center', 800);
+    if (open && SAVE.stars[i]) txt('\u2605'.repeat(SAVE.stars[i]), x + cell / 2, y + cell - 11, 9, '#fff3b0', 'center', 800, 'rgba(120,70,0,0.6)');
     if (open) btns.push({ x, y, w: cell, h: cell, fn: () => loadLevel(i) });
   }
   glossBtn(px + 30, py + ph - 70, pw - 60, 46, 16, '#8a99b3');
@@ -881,6 +1016,8 @@ function update(dt) {
   G.floats = G.floats.filter(f => f.t < 1);
   G.holePulse = G.holePulse.map(v => Math.max(0, v - dt * 3));
   if (G.status === 'won') G.wonT += dt;
+  if (G.status === 'failed') G.failT += dt;
+  if (G.status === 'play' && G.steps >= G.limit && G.s.cubes.every((q, i) => !G.vis[i].anim && !G.vis[i].q.length)) { G.status = 'failed'; G.failT = 0; buzz([30, 40, 30]); }
 }
 
 function draw() {
@@ -889,6 +1026,7 @@ function draw() {
   ctx.save();
   ctx.translate(offX, offY); ctx.scale(scale, scale);
   G.buttons = [];
+  if (G.status === 'home') { drawHome(); drawEffects(); ctx.restore(); return; }
   drawHud();
   drawBoard();
   drawCubes();
@@ -897,6 +1035,7 @@ function draw() {
   drawHint();
   drawLegend();
   if (G.status === 'won' && G.wonT > 0.7) drawWon();
+  if (G.status === 'failed') drawFailed();
   if (G.status === 'select') drawSelect();
   ctx.restore();
 }
@@ -927,6 +1066,7 @@ if (window.ResizeObserver) new ResizeObserver(() => resize()).observe(cv);
 resize();
 const startLevel = DEV ? Math.max(0, Math.min(LEVELS.length - 1, (parseInt(new URLSearchParams(location.search).get('level'), 10) || 1) - 1)) : 0;
 loadLevel(startLevel);
+if (!(DEV && new URLSearchParams(location.search).has('level'))) G.status = 'home';
 let last = 0;
 function frame(ts) {
   const dt = Math.min(0.05, (ts - (last || ts)) / 1000);
